@@ -1,0 +1,23 @@
+{
+    "Group": "org.herolias",
+    "Name": "DynamicTooltipsLib",
+    "Version": "1.0.0",
+    "Description": "Library mod that enables dynamic, per-item tooltips with multi-mod support",
+    "Authors": [
+        {
+            "Name": "MineAndCraft",
+            "Role": "Developer"
+        }
+    ],
+    "Website": "https://discord.gg/7XQAnUfQfM",
+    "ServerVersion": "*",
+    "Dependencies": {
+        
+    },
+    "OptionalDependencies": {
+        
+    },
+    "DisabledByDefault": false,
+    "Main": "org.herolias.tooltips.DynamicTooltipsLib",
+    "IncludesAssetPack": false
+}

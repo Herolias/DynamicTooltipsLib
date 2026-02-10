@@ -1,0 +1,131 @@
+plugins {
+    id 'java'
+    id 'org.jetbrains.gradle.plugin.idea-ext' version '1.3'
+}
+
+import org.gradle.internal.os.OperatingSystem
+
+ext {
+    if (project.hasProperty('hytale_home')) {
+        hytaleHome = project.findProperty('hytale_home')
+    }
+    else {
+        def os = OperatingSystem.current()
+        if (os.isWindows()) {
+            hytaleHome = "${System.getProperty("user.home")}/AppData/Roaming/Hytale"
+        }
+        else if (os.isMacOsX()) {
+            hytaleHome = "${System.getProperty("user.home")}/Library/Application Support/Hytale"
+        }
+        else if (os.isLinux()) {
+            hytaleHome = "${System.getProperty("user.home")}/.var/app/com.hypixel.HytaleLauncher/data/Hytale"
+            if (!file(hytaleHome).exists()) {
+                hytaleHome = "${System.getProperty("user.home")}/.local/share/Hytale"
+            }
+        }
+    }
+}
+
+if (!project.hasProperty('hytaleHome')) {
+    throw new GradleException('Your Hytale install could not be detected automatically. If you are on an unsupported platform or using a custom install location, please define the install location using the hytale_home property.');
+}
+else if (!file(project.findProperty('hytaleHome')).exists()) {
+    throw new GradleException("Failed to find Hytale at the expected location. Please make sure you have installed the game. The expected location can be changed using the hytale_home property. Currently looking in ${project.findProperty('hytaleHome')}")
+}
+
+java {
+    toolchain.languageVersion = JavaLanguageVersion.of(java_version)
+    withSourcesJar()
+    withJavadocJar()
+}
+
+// Quiet warnings about missing Javadocs.
+javadoc {
+    options.addStringOption('Xdoclint:-missing', '-quiet')
+}
+
+// Adds the Hytale server as a build dependency, allowing you to reference and
+// compile against their code. This requires you to have Hytale installed using
+// the official launcher for now.
+dependencies {
+    implementation(files("$hytaleHome/install/$patchline/package/game/latest/Server/HytaleServer.jar"))
+}
+
+// Create the working directory to run the server if it does not already exist.
+def serverRunDir = file("$projectDir/run")
+if (!serverRunDir.exists()) {
+    serverRunDir.mkdirs()
+}
+
+// Updates the manifest.json file with the latest properties defined in the
+// build.properties file. Currently we update the version and if packs are
+// included with the plugin.
+tasks.register('updatePluginManifest') {
+    def manifestFile = file('src/main/resources/manifest.json')
+    doLast {
+        if (!manifestFile.exists()) {
+            throw new GradleException("Could not find manifest.json at ${manifestFile.path}!")
+        }
+        def manifestJson = new groovy.json.JsonSlurper().parseText(manifestFile.text)
+        manifestJson.Version = version
+        manifestJson.IncludesAssetPack = includes_pack.toBoolean()
+        manifestFile.text = groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(manifestJson))
+    }
+}
+
+// Makes sure the plugin manifest is up to date.
+tasks.named('processResources') {
+    dependsOn 'updatePluginManifest'
+}
+
+def createServerRunArguments(String srcDir) {
+    def programParameters = '--allow-op --disable-sentry --assets="' + "${hytaleHome}/install/$patchline/package/game/latest/Assets.zip" + '"'
+    def modPaths = []
+    if (includes_pack.toBoolean()) {
+        modPaths << srcDir
+    }
+    if (load_user_mods.toBoolean()) {
+        modPaths << "${hytaleHome}/UserData/Mods"
+    }
+    if (!modPaths.isEmpty()) {
+        programParameters += ' --mods="' + modPaths.join(',') + '"'
+    }
+    return programParameters
+}
+
+// Creates a run configuration in IDEA that will run the Hytale server with
+// your plugin and the default assets.
+idea.project.settings.runConfigurations {
+    'HytaleServer'(org.jetbrains.gradle.ext.Application) {
+        mainClass = 'com.hypixel.hytale.Main'
+        moduleName = project.idea.module.name + '.main'
+        programParameters = createServerRunArguments(sourceSets.main.java.srcDirs.first().parentFile.absolutePath)
+        workingDirectory = serverRunDir.absolutePath
+    }
+}
+
+// Creates a launch.json file for VSCode with the same configuration
+tasks.register('generateVSCodeLaunch') {
+    def vscodeDir = file("$projectDir/.vscode")
+    def launchFile = file("$vscodeDir/launch.json")
+    doLast {
+        if (!vscodeDir.exists()) {
+            vscodeDir.mkdirs()
+        }
+        def programParams = createServerRunArguments("\${workspaceFolder}")
+        def launchConfig = [
+            version: "0.2.0",
+            configurations: [
+                [
+                    type: "java",
+                    name: "HytaleServer",
+                    request: "launch",
+                    mainClass: "com.hypixel.hytale.Main",
+                    args: programParams,
+                    cwd: "\${workspaceFolder}/run"
+                ]
+            ]
+        ]
+        launchFile.text = groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(launchConfig))
+    }
+}
