@@ -29,6 +29,8 @@
 
 ## Integration
 
+See [TooltipExample](https://github.com/Herolias/TooltipExample) for an example implementation.
+
 ### 1. Gradle Dependency
 Add the library to your `build.gradle` as `compileOnly`. You do not need to shade/bundle it; the server will load it.
 
