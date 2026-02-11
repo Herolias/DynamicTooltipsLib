@@ -125,7 +125,7 @@ When multiple mods add tooltips to the same item, they are stacked based on prio
 | `LAST` | 200 | Footer information, debug info. |
 
 ### Force Refreshing
-If you change a config value (e.g., "Show Item IDs: true"), you need to force a refresh so players see the change immediately.
+If you change a config value (e.g. changed a damage value), you need to force a refresh so players see the change immediately.
 
 ```java
 DynamicTooltipsApiProvider.get().refreshAllPlayers();
@@ -155,4 +155,6 @@ The system uses bounded LRU caches (Max 10,000 items) to ensure that generating 
 
 ## License
 
-MIT License. Free to use in any Hytale mod.
+See the [LICENSE](LICENSE) file for details.
+Free to use in any project, but you cannot sell the library itself or claim it as your own.
+Mods created with this lib must be more than just a slightly modified copy.
