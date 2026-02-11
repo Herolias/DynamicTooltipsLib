@@ -71,10 +71,7 @@ public class DynamicTooltipsLib extends JavaPlugin {
         this.packetAdapter.register();
         LOGGER.atInfo().log("Registered TooltipPacketAdapter (outbound + inbound filters)");
 
-        // Register the built-in custom-data tooltip provider
-        this.tooltipRegistry.registerProvider(
-                new org.herolias.tooltips.internal.CustomDataTooltipProvider());
-        LOGGER.atInfo().log("Registered built-in CustomDataTooltipProvider");
+
 
         // Register the public API
         DynamicTooltipsApi api = new DynamicTooltipsApiImpl(

@@ -52,7 +52,12 @@ public class VirtualItemRegistry {
      * Global cache: virtual item ID → cloned {@link ItemBase}.
      * Populated lazily.
      */
-    private final ConcurrentHashMap<String, ItemBase> virtualItemCache = new ConcurrentHashMap<>();
+    /**
+     * Global cache: virtual item ID → cloned {@link ItemBase}.
+     * <p>
+     * Bounded LRU cache to prevent memory leaks from infinite dynamic tooltips.
+     */
+    private final Map<String, ItemBase> virtualItemCache = Collections.synchronizedMap(new LRUCache<>(10000));
 
     /**
      * Per-player tracking: which virtual item IDs have been sent to each player.
@@ -79,8 +84,29 @@ public class VirtualItemRegistry {
     /** Cache: "language:baseItemId" → original description text. */
     private final ConcurrentHashMap<String, String> originalDescriptionCache = new ConcurrentHashMap<>();
 
-    /** Cache: virtualId → built description string. */
-    private final ConcurrentHashMap<String, String> builtDescriptionCache = new ConcurrentHashMap<>();
+    /**
+     * Cache: virtualId → built description string.
+     * <p>
+     * Bounded LRU cache.
+     */
+    private final Map<String, String> builtDescriptionCache = Collections.synchronizedMap(new LRUCache<>(10000));
+
+    /**
+     * Simple thread-safe LRU Cache implementation.
+     */
+    private static class LRUCache<K, V> extends LinkedHashMap<K, V> {
+        private final int maxEntries;
+
+        public LRUCache(int maxEntries) {
+            super(maxEntries, 0.75f, true);
+            this.maxEntries = maxEntries;
+        }
+
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<K, V> eldest) {
+            return size() > maxEntries;
+        }
+    }
 
     // ─────────────────────────────────────────────────────────────────────
     //  Virtual ID generation
