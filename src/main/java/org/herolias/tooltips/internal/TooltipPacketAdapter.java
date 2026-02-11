@@ -11,11 +11,13 @@ import com.hypixel.hytale.protocol.packets.assets.UpdateTranslations;
 import com.hypixel.hytale.protocol.packets.interaction.SyncInteractionChains;
 import com.hypixel.hytale.protocol.packets.interaction.SyncInteractionChain;
 import com.hypixel.hytale.protocol.packets.inventory.UpdatePlayerInventory;
+import com.hypixel.hytale.protocol.packets.player.JoinWorld;
 import com.hypixel.hytale.protocol.packets.player.MouseInteraction;
 import com.hypixel.hytale.protocol.packets.window.OpenWindow;
 import com.hypixel.hytale.protocol.packets.window.UpdateWindow;
 import com.hypixel.hytale.protocol.packets.interface_.CustomPage;
 import com.hypixel.hytale.protocol.packets.interface_.CustomUICommand;
+import com.hypixel.hytale.server.core.HytaleServer;
 import com.hypixel.hytale.server.core.io.adapter.PacketAdapters;
 import com.hypixel.hytale.server.core.io.adapter.PacketFilter;
 import com.hypixel.hytale.server.core.io.adapter.PlayerPacketFilter;
@@ -27,6 +29,7 @@ import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Bidirectional packet adapter that provides per-item dynamic tooltips
@@ -113,6 +116,18 @@ public class TooltipPacketAdapter {
     private final ConcurrentHashMap<UUID, PlayerRef> knownPlayerRefs = new ConcurrentHashMap<>();
 
     /**
+     * Players currently transitioning between worlds. Set when a {@link JoinWorld}
+     * packet is detected outbound; cleared when the first {@link UpdatePlayerInventory}
+     * arrives for that player. While set, tooltip processing is deferred to avoid
+     * injecting auxiliary packets that delay the client's {@code ClientReady} response
+     * past the portal instance world's timeout.
+     */
+    private final Set<UUID> worldTransitioning = ConcurrentHashMap.newKeySet();
+
+    /** Delay (in seconds) before replaying inventory with tooltips after a world transition. */
+    private static final int POST_TRANSITION_REFRESH_DELAY_SECS = 2;
+
+    /**
      * Snapshot of the hotbar section at the time of the last
      * {@code UpdatePlayerInventory} processing.
      */
@@ -159,11 +174,33 @@ public class TooltipPacketAdapter {
     }
 
     public void onPlayerLeave(@Nonnull UUID playerUuid) {
+        worldTransitioning.remove(playerUuid);
         playerActiveHotbarSlot.remove(playerUuid);
         hotbarCache.remove(playerUuid);
         lastSentTranslations.remove(playerUuid);
         lastRawInventory.remove(playerUuid);
         knownPlayerRefs.remove(playerUuid);
+    }
+
+    /**
+     * Schedules a deferred tooltip refresh for a player who just transitioned
+     * between worlds. The delay gives the client time to finish the world load
+     * and send {@code ClientReady} before we inject auxiliary tooltip packets.
+     */
+    private void schedulePostTransitionRefresh(@Nonnull UUID playerUuid) {
+        try {
+            HytaleServer.SCHEDULED_EXECUTOR.schedule(() -> {
+                try {
+                    refreshPlayer(playerUuid);
+                } catch (Exception e) {
+                    LOGGER.atWarning().log("Post-transition tooltip refresh failed for "
+                            + playerUuid + ": " + e.getMessage());
+                }
+            }, POST_TRANSITION_REFRESH_DELAY_SECS, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            LOGGER.atWarning().log("Failed to schedule post-transition refresh for "
+                    + playerUuid + ": " + e.getMessage());
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -226,13 +263,33 @@ public class TooltipPacketAdapter {
 
         isProcessing.set(true);
         try {
-            // Track the PlayerRef for refresh support
-            knownPlayerRefs.put(playerRef.getUuid(), playerRef);
+            UUID playerUuid = playerRef.getUuid();
 
-            if (packet instanceof UpdatePlayerInventory invPacket) {
+            // Track the PlayerRef for refresh support
+            knownPlayerRefs.put(playerUuid, playerRef);
+
+            // ── World-transition detection ──
+            // When a JoinWorld packet is sent, the client must process it and
+            // respond with ClientReady before the portal instance world's
+            // timeout expires. Injecting auxiliary packets (UpdateItems,
+            // UpdateTranslations) during this window can delay ClientReady
+            // past the timeout, causing the world thread to shut down and
+            // the player to be disconnected. We mark the player as
+            // "transitioning" and defer tooltip processing until afterwards.
+            if (packet instanceof JoinWorld) {
+                worldTransitioning.add(playerUuid);
+            } else if (packet instanceof UpdatePlayerInventory invPacket) {
                 // Cache a deep clone of the raw packet BEFORE processing modifies it
-                lastRawInventory.put(playerRef.getUuid(), deepCloneInventory(invPacket));
-                processPlayerInventory(playerRef, invPacket);
+                lastRawInventory.put(playerUuid, deepCloneInventory(invPacket));
+
+                if (worldTransitioning.remove(playerUuid)) {
+                    // Player is mid-transition — let the vanilla inventory packet
+                    // through unmodified so the client can send ClientReady ASAP.
+                    // Tooltips will be applied by a deferred refresh.
+                    schedulePostTransitionRefresh(playerUuid);
+                } else {
+                    processPlayerInventory(playerRef, invPacket);
+                }
             } else if (packet instanceof OpenWindow openWindow) {
                 processWindowInventory(playerRef, openWindow.inventory);
             } else if (packet instanceof UpdateWindow updateWindow) {
@@ -831,8 +888,12 @@ public class TooltipPacketAdapter {
             packet.type = UpdateType.AddOrUpdate;
             packet.items = items;
             packet.removedItems = new String[0];
-            packet.updateModels = true;
-            packet.updateIcons = true;
+            // Virtual items share the exact same model and icon assets as their
+            // base items — only the ID and translation properties differ. Skipping
+            // model/icon reloading avoids a costly client-side stall, especially
+            // during world transitions and first-time container opens.
+            packet.updateModels = false;
+            packet.updateIcons = false;
             playerRef.getPacketHandler().writeNoCache(packet);
         } catch (Exception e) {
             LOGGER.atWarning().log("Failed to send UpdateItems for virtual items: " + e.getMessage());

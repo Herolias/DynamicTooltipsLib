@@ -173,6 +173,12 @@ public class VirtualItemRegistry {
                 ItemBase clone = originalPacket.clone();
                 clone.id = virtualId;
 
+                // Prevent virtual items from appearing in the creative inventory.
+                // categories controls which creative library tabs show the item;
+                // variant = true causes the client to hide it by default.
+                clone.categories = null;
+                clone.variant = true;
+
                 // Give the virtual item its own unique description translation key.
                 String virtualDescKey = getVirtualDescriptionKey(virtualId);
                 if (clone.translationProperties != null) {

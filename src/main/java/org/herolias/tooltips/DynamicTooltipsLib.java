@@ -38,6 +38,20 @@ public class DynamicTooltipsLib extends JavaPlugin {
     /** Tracks known-online players so we can detect disconnects. */
     private final Set<UUID> knownPlayers = ConcurrentHashMap.newKeySet();
 
+    /**
+     * Tracks how many consecutive detector ticks each player has been "missing"
+     * (not found in any world). This prevents false disconnect detection during
+     * portal transitions, where a player is briefly between worlds.
+     */
+    private final ConcurrentHashMap<UUID, Integer> missedTicks = new ConcurrentHashMap<>();
+
+    /**
+     * Number of consecutive detector ticks (at 1 s interval) a player must be
+     * absent from all worlds before we treat them as disconnected. This grace
+     * period covers portal transitions, which can take several seconds.
+     */
+    private static final int DISCONNECT_GRACE_TICKS = 10;
+
     public DynamicTooltipsLib(@Nonnull JavaPluginInit init) {
         super(init);
         LOGGER.atInfo().log("DynamicTooltipsLib v"
@@ -90,6 +104,10 @@ public class DynamicTooltipsLib extends JavaPlugin {
      * Polls the online player list and cleans up state for disconnected players.
      * This mirrors the Hytale modding pattern used by Simple Enchantments, since
      * there is no dedicated player-disconnect event in the Hytale API.
+     * <p>
+     * A grace period ({@link #DISCONNECT_GRACE_TICKS}) prevents false positives
+     * during portal transitions, where a player is temporarily not present in
+     * any world while the client loads the new instance.
      */
     private void checkForDisconnectedPlayers() {
         try {
@@ -108,14 +126,21 @@ public class DynamicTooltipsLib extends JavaPlugin {
                 }
             }
 
-            // Find disconnected players
+            // Find disconnected players — with grace period for world transitions
             Iterator<UUID> it = knownPlayers.iterator();
             while (it.hasNext()) {
                 UUID uuid = it.next();
                 if (!onlinePlayers.contains(uuid)) {
-                    it.remove();
-                    packetAdapter.onPlayerLeave(uuid);
-                    virtualItemRegistry.onPlayerLeave(uuid);
+                    int missed = missedTicks.merge(uuid, 1, Integer::sum);
+                    if (missed >= DISCONNECT_GRACE_TICKS) {
+                        it.remove();
+                        missedTicks.remove(uuid);
+                        packetAdapter.onPlayerLeave(uuid);
+                        virtualItemRegistry.onPlayerLeave(uuid);
+                    }
+                } else {
+                    // Player is back (or still online) — reset grace counter
+                    missedTicks.remove(uuid);
                 }
             }
         } catch (Exception e) {
