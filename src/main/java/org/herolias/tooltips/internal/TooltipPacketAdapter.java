@@ -33,41 +33,29 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * Bidirectional packet adapter that provides per-item dynamic tooltips
- * using a <b>hybrid</b> strategy: virtual item IDs for display-only sections
- * and description-translation overrides for interaction sections.
+ * using <b>virtual item IDs</b> for all inventory sections.
  *
  * <h2>Problem</h2>
  * Hytale's tooltip system resolves item descriptions per item <em>type</em>.
  * Two items of the same type always share the same description key, making it
  * impossible to show different tooltips on two items of the same base type.
  *
- * <h2>Solution: hybrid approach</h2>
- * <table>
- *   <tr><th>Section</th><th>Strategy</th><th>Why</th></tr>
- *   <tr><td>Hotbar, Utility, Tools</td>
- *       <td>Keep real item IDs; override the item type's description translation
- *           with enriched text via {@code UpdateTranslations}</td>
- *       <td>These sections participate in {@link SyncInteractionChains}. The
- *           client needs real item IDs for interactions to work.</td></tr>
- *   <tr><td>Armor, Storage, Backpack, BuilderMaterial</td>
- *       <td>Virtual item IDs (clone + swap)</td>
- *       <td>Items in these sections are never referenced in interaction packets.
- *           Virtual IDs give unique per-instance tooltips.</td></tr>
- *   <tr><td>Containers (chests, etc.)</td>
- *       <td>Virtual item IDs (clone + swap)</td>
- *       <td>Container items are not part of the player's interaction state.</td></tr>
- * </table>
+ * <h2>Solution: virtual item IDs</h2>
+ * Every item with tooltip data gets a unique virtual item ID (a clone of the
+ * original with modified translation properties). This applies uniformly to
+ * <b>all</b> inventory sections: hotbar, utility, tools, armor, storage,
+ * backpack, builder material, and container windows.
+ *
+ * <h2>Inbound translation</h2>
+ * The inbound filter translates any virtual item IDs in {@link MouseInteraction}
+ * and {@link SyncInteractionChains} packets back to real IDs, ensuring that
+ * interactions work correctly despite the virtual IDs used for display.
  *
  * <h2>Generalization</h2>
  * This adapter is <b>mod-agnostic</b>. It does not contain any enchantment-specific
  * logic. Instead, it delegates to a {@link TooltipRegistry} which queries all
  * registered {@link org.herolias.tooltips.api.TooltipProvider}s to compose the
  * final tooltip for each item.
- *
- * <h2>Inbound safety net</h2>
- * The inbound filter translates any virtual item IDs in {@link MouseInteraction}
- * and {@link SyncInteractionChains} packets back to real IDs, protecting against
- * edge cases where a virtual ID leaks into an interaction section.
  */
 public class TooltipPacketAdapter {
 
@@ -87,15 +75,6 @@ public class TooltipPacketAdapter {
      */
     private final ThreadLocal<Boolean> isProcessing = ThreadLocal.withInitial(() -> false);
 
-    /**
-     * Per-player tracking of the active hotbar slot index.
-     */
-    private final ConcurrentHashMap<UUID, Integer> playerActiveHotbarSlot = new ConcurrentHashMap<>();
-
-    /**
-     * Per-player cached hotbar data for building corrective packets.
-     */
-    private final ConcurrentHashMap<UUID, CachedHotbarData> hotbarCache = new ConcurrentHashMap<>();
 
     /**
      * Per-player tracking of last sent translations (for diff-based sending).
@@ -126,20 +105,6 @@ public class TooltipPacketAdapter {
 
     /** Delay (in seconds) before replaying inventory with tooltips after a world transition. */
     private static final int POST_TRANSITION_REFRESH_DELAY_SECS = 2;
-
-    /**
-     * Snapshot of the hotbar section at the time of the last
-     * {@code UpdatePlayerInventory} processing.
-     */
-    private static class CachedHotbarData {
-        short capacity;
-        /** Slot → original (unmodified, deep-cloned) {@link ItemWithAllMetadata}. */
-        Map<Integer, ItemWithAllMetadata> originalItems;
-        /** Slot → composed tooltip (only for slots with tooltip data). */
-        Map<Integer, TooltipRegistry.ComposedTooltip> composedSlots;
-        /** Slot → pre-computed virtual item ID (only for slots with tooltip data). */
-        Map<Integer, String> virtualIds;
-    }
 
     public TooltipPacketAdapter(
             @Nonnull VirtualItemRegistry virtualItemRegistry,
@@ -175,8 +140,6 @@ public class TooltipPacketAdapter {
 
     public void onPlayerLeave(@Nonnull UUID playerUuid) {
         worldTransitioning.remove(playerUuid);
-        playerActiveHotbarSlot.remove(playerUuid);
-        hotbarCache.remove(playerUuid);
         lastSentTranslations.remove(playerUuid);
         lastRawInventory.remove(playerUuid);
         knownPlayerRefs.remove(playerUuid);
@@ -294,8 +257,6 @@ public class TooltipPacketAdapter {
                 processWindowInventory(playerRef, openWindow.inventory);
             } else if (packet instanceof UpdateWindow updateWindow) {
                 processWindowInventory(playerRef, updateWindow.inventory);
-            } else if (packet instanceof SyncInteractionChains syncPacket) {
-                detectHotbarSlotChange(playerRef, syncPacket);
             } else if (packet instanceof CustomPage customPage) {
                 processCustomPage(playerRef, customPage);
             }
@@ -322,50 +283,18 @@ public class TooltipPacketAdapter {
         Map<String, String> translations = new LinkedHashMap<>();
 
         try {
-            // ── Hotbar: virtual IDs for non-active slots, real ID for active slot ──
-            int activeSlot = playerActiveHotbarSlot.getOrDefault(playerUuid, 0);
-            Set<String> overriddenTypes = new HashSet<>();
-
-            try {
-                processHotbarSection(playerUuid, activeSlot, packet.hotbar, language,
-                        newVirtualItems, translations, overriddenTypes);
-            } catch (Exception e) {
-                LOGGER.atWarning().log("Error processing hotbar section for " + playerUuid + ": " + e.getMessage());
-            }
-
-            // ── Utility / Tools: translation overrides only (no virtual IDs) ──
-            try {
-                collectInteractiveTranslations(packet.utility, language, translations, overriddenTypes);
-                collectInteractiveTranslations(packet.tools, language, translations, overriddenTypes);
-            } catch (Exception e) {
-                LOGGER.atWarning().log("Error processing utility/tools sections for " + playerUuid + ": " + e.getMessage());
-            }
-
-            // Restore descriptions for item types that were overridden before but aren't now
-            Set<String> previousOverrides = virtualItemRegistry.getAndUpdateHotbarOverrides(
-                    playerUuid, overriddenTypes);
-            if (previousOverrides != null) {
-                for (String prevType : previousOverrides) {
-                    if (!overriddenTypes.contains(prevType)) {
-                        String descKey = virtualItemRegistry.getItemDescriptionKey(prevType);
-                        String originalDesc = virtualItemRegistry.getOriginalDescription(prevType, language);
-                        translations.put(descKey, originalDesc == null ? "" : originalDesc);
-                    }
-                }
-            }
-
-            // ── Display-only sections: virtual item IDs ──
-            try {
-                processSection(playerUuid, "armor", packet.armor, language, newVirtualItems, translations);
-                processSection(playerUuid, "storage", packet.storage, language, newVirtualItems, translations);
-                processSection(playerUuid, "backpack", packet.backpack, language, newVirtualItems, translations);
-                processSection(playerUuid, "builderMaterial", packet.builderMaterial, language, newVirtualItems, translations);
-            } catch (Exception e) {
-                LOGGER.atWarning().log("Error processing display sections for " + playerUuid + ": " + e.getMessage());
-            }
-
+            // All sections use virtual item IDs uniformly.
+            // The inbound filter translates virtual IDs back to real IDs
+            // for SyncInteractionChains and MouseInteraction packets.
+            processSection(playerUuid, "hotbar", packet.hotbar, language, newVirtualItems, translations);
+            processSection(playerUuid, "utility", packet.utility, language, newVirtualItems, translations);
+            processSection(playerUuid, "tools", packet.tools, language, newVirtualItems, translations);
+            processSection(playerUuid, "armor", packet.armor, language, newVirtualItems, translations);
+            processSection(playerUuid, "storage", packet.storage, language, newVirtualItems, translations);
+            processSection(playerUuid, "backpack", packet.backpack, language, newVirtualItems, translations);
+            processSection(playerUuid, "builderMaterial", packet.builderMaterial, language, newVirtualItems, translations);
         } catch (Exception e) {
-            LOGGER.atSevere().log("Trapped exception in processPlayerInventory for " + playerUuid + ": " + e.getMessage());
+            LOGGER.atSevere().log("Error in processPlayerInventory for " + playerUuid + ": " + e.getMessage());
         } finally {
             sendAuxiliaryPackets(playerRef, newVirtualItems, translations);
         }
@@ -507,33 +436,13 @@ public class TooltipPacketAdapter {
             String cachedDesc = virtualItemRegistry.getCachedDescription(virtualId);
 
             if (cachedDesc != null) {
-                // Determine if we need a name override
-                String nameOverride = null;
-                // Try to extract from the virtual ID — we search all cached hotbar data
-                CachedHotbarData cache = hotbarCache.get(playerUuid);
-                if (cache != null && cache.virtualIds != null) {
-                    for (Map.Entry<Integer, String> entry : cache.virtualIds.entrySet()) {
-                        if (virtualId.equals(entry.getValue())) {
-                            TooltipRegistry.ComposedTooltip composed = cache.composedSlots.get(entry.getKey());
-                            if (composed != null) {
-                                nameOverride = composed.getNameOverride();
-                            }
-                            break;
-                        }
-                    }
-                }
-
+                // The virtual item base is already cached with the correct name override
+                // from when it was first created via processSection.
                 ItemBase virtualBase = virtualItemRegistry.getOrCreateVirtualItemBase(
-                        itemId, virtualId, nameOverride);
+                        itemId, virtualId, null);
                 if (virtualBase != null) {
                     newVirtualItems.put(virtualId, virtualBase);
                     translations.put(descKey, cachedDesc);
-
-                    // Handle name translation if overridden
-                    if (nameOverride != null) {
-                        String nameKey = VirtualItemRegistry.getVirtualNameKey(virtualId);
-                        translations.put(nameKey, nameOverride);
-                    }
                 }
                 return virtualId;
             }
@@ -626,220 +535,7 @@ public class TooltipPacketAdapter {
         }
     }
 
-    // ───────────────────────────────────────────────────────────────────────
-    //  Hotbar section processing
-    // ───────────────────────────────────────────────────────────────────────
 
-    private void processHotbarSection(
-            @Nonnull UUID playerUuid,
-            int activeSlot,
-            @Nullable InventorySection hotbar,
-            @Nullable String language,
-            @Nonnull Map<String, ItemBase> newVirtualItems,
-            @Nonnull Map<String, String> translations,
-            @Nonnull Set<String> overriddenTypes) {
-
-        if (hotbar == null || hotbar.items == null || hotbar.items.isEmpty()) {
-            hotbarCache.remove(playerUuid);
-            return;
-        }
-
-        CachedHotbarData cache = new CachedHotbarData();
-        cache.capacity = hotbar.capacity;
-        cache.originalItems = new HashMap<>();
-        cache.composedSlots = new HashMap<>();
-        cache.virtualIds = new HashMap<>();
-
-        for (Map.Entry<Integer, ItemWithAllMetadata> entry : hotbar.items.entrySet()) {
-            int slot = entry.getKey();
-            ItemWithAllMetadata itemPacket = entry.getValue();
-
-            if (itemPacket == null || itemPacket.itemId == null || itemPacket.itemId.isEmpty()) continue;
-            if (VirtualItemRegistry.isVirtualId(itemPacket.itemId)) continue;
-
-            // Cache the original item (deep clone)
-            cache.originalItems.put(slot, itemPacket.clone());
-
-            TooltipRegistry.ComposedTooltip composed = tooltipRegistry.compose(
-                    itemPacket.itemId, itemPacket.metadata);
-            if (composed == null) continue;
-
-            String baseItemId = itemPacket.itemId;
-            String virtualId = virtualItemRegistry.generateVirtualId(baseItemId, composed.getCombinedHash());
-            cache.composedSlots.put(slot, composed);
-            cache.virtualIds.put(slot, virtualId);
-
-            if (slot == activeSlot) {
-                // ── Active slot: keep real ID, override the type's description ──
-                if (!overriddenTypes.contains(baseItemId)) {
-                    overriddenTypes.add(baseItemId);
-                    String descKey = virtualItemRegistry.getItemDescriptionKey(baseItemId);
-                    String originalDesc = virtualItemRegistry.getOriginalDescription(baseItemId, language);
-                    String enrichedDesc = composed.buildDescription(originalDesc);
-                    translations.put(descKey, enrichedDesc);
-                    virtualItemRegistry.cacheDescription(virtualId, enrichedDesc);
-
-                    if (composed.getNameOverride() != null) {
-                        String nameKey = virtualItemRegistry.getItemNameKey(baseItemId);
-                        translations.put(nameKey, composed.getNameOverride());
-                    }
-                }
-            } else {
-                // ── Non-active slot: swap to virtual ID ──
-                ItemBase virtualBase = virtualItemRegistry.getOrCreateVirtualItemBase(
-                        baseItemId, virtualId, composed.getNameOverride());
-                if (virtualBase == null) continue;
-
-                newVirtualItems.put(virtualId, virtualBase);
-
-                String descKey = VirtualItemRegistry.getVirtualDescriptionKey(virtualId);
-                if (!translations.containsKey(descKey)) {
-                    String originalDesc = virtualItemRegistry.getOriginalDescription(baseItemId, language);
-                    String enrichedDesc = composed.buildDescription(originalDesc);
-                    translations.put(descKey, enrichedDesc);
-                    virtualItemRegistry.cacheDescription(virtualId, enrichedDesc);
-                }
-
-                if (composed.getNameOverride() != null) {
-                    String nameKey = VirtualItemRegistry.getVirtualNameKey(virtualId);
-                    translations.put(nameKey, composed.getNameOverride());
-                }
-
-                ItemWithAllMetadata clonedItem = itemPacket.clone();
-                clonedItem.itemId = virtualId;
-                hotbar.items.put(slot, clonedItem);
-            }
-        }
-
-        hotbarCache.put(playerUuid, cache);
-    }
-
-    // ───────────────────────────────────────────────────────────────────────
-    //  Hotbar slot change detection and corrective packet sending
-    // ───────────────────────────────────────────────────────────────────────
-
-    private void detectHotbarSlotChange(@Nonnull PlayerRef playerRef,
-                                        @Nonnull SyncInteractionChains syncPacket) {
-        if (syncPacket.updates == null || syncPacket.updates.length == 0) return;
-
-        int newActiveSlot = syncPacket.updates[0].activeHotbarSlot;
-        UUID playerUuid = playerRef.getUuid();
-        Integer oldActiveSlot = playerActiveHotbarSlot.put(playerUuid, newActiveSlot);
-
-        if (oldActiveSlot != null && oldActiveSlot != newActiveSlot) {
-            sendCorrectiveHotbar(playerRef, oldActiveSlot, newActiveSlot);
-        }
-    }
-
-    private void sendCorrectiveHotbar(@Nonnull PlayerRef playerRef,
-                                      int oldActiveSlot, int newActiveSlot) {
-        UUID playerUuid = playerRef.getUuid();
-        CachedHotbarData cache = hotbarCache.get(playerUuid);
-        if (cache == null || cache.originalItems.isEmpty()) return;
-
-        String language = playerRef.getLanguage();
-        Map<String, ItemBase> newVirtualItems = new LinkedHashMap<>();
-        Map<String, String> translations = new LinkedHashMap<>();
-
-        // ── Restore old active slot's type description ──
-        TooltipRegistry.ComposedTooltip oldComposed = cache.composedSlots.get(oldActiveSlot);
-        if (oldComposed != null) {
-            ItemWithAllMetadata oldOriginal = cache.originalItems.get(oldActiveSlot);
-            if (oldOriginal != null) {
-                String descKey = virtualItemRegistry.getItemDescriptionKey(oldOriginal.itemId);
-                String originalDesc = virtualItemRegistry.getOriginalDescription(oldOriginal.itemId, language);
-                translations.put(descKey, originalDesc);
-
-                // Restore name if it was overridden
-                if (oldComposed.getNameOverride() != null) {
-                    String nameKey = virtualItemRegistry.getItemNameKey(oldOriginal.itemId);
-                    // Restore from I18n
-                    com.hypixel.hytale.server.core.modules.i18n.I18nModule i18n =
-                            com.hypixel.hytale.server.core.modules.i18n.I18nModule.get();
-                    if (i18n != null) {
-                        String originalName = i18n.getMessage(language, nameKey);
-                        if (originalName != null) {
-                            translations.put(nameKey, originalName);
-                        }
-                    }
-                }
-            }
-        }
-
-        // ── Override new active slot's type description ──
-        TooltipRegistry.ComposedTooltip newComposed = cache.composedSlots.get(newActiveSlot);
-        String newVirtualId = cache.virtualIds.get(newActiveSlot);
-        if (newComposed != null && newVirtualId != null) {
-            ItemWithAllMetadata newOriginal = cache.originalItems.get(newActiveSlot);
-            if (newOriginal != null) {
-                String descKey = virtualItemRegistry.getItemDescriptionKey(newOriginal.itemId);
-                String originalDesc = virtualItemRegistry.getOriginalDescription(newOriginal.itemId, language);
-                String enrichedDesc = newComposed.buildDescription(originalDesc);
-                translations.put(descKey, enrichedDesc);
-
-                if (newComposed.getNameOverride() != null) {
-                    String nameKey = virtualItemRegistry.getItemNameKey(newOriginal.itemId);
-                    translations.put(nameKey, newComposed.getNameOverride());
-                }
-            }
-        }
-
-        // ── Build corrective hotbar section ──
-        InventorySection correctiveHotbar = new InventorySection();
-        correctiveHotbar.capacity = cache.capacity;
-        correctiveHotbar.items = new HashMap<>();
-
-        buildCorrectiveSlot(cache, oldActiveSlot, false, newVirtualItems, translations, language, correctiveHotbar);
-        buildCorrectiveSlot(cache, newActiveSlot, true, newVirtualItems, translations, language, correctiveHotbar);
-
-        sendAuxiliaryPackets(playerRef, newVirtualItems, translations);
-
-        try {
-            UpdatePlayerInventory correctivePacket = new UpdatePlayerInventory();
-            correctivePacket.hotbar = correctiveHotbar;
-            playerRef.getPacketHandler().writeNoCache(correctivePacket);
-        } catch (Exception e) {
-            LOGGER.atWarning().log("Failed to send corrective hotbar packet: " + e.getMessage());
-        }
-    }
-
-    // ───────────────────────────────────────────────────────────────────────
-    //  Interactive section translation overrides (utility / tools)
-    // ───────────────────────────────────────────────────────────────────────
-
-    private void collectInteractiveTranslations(
-            @Nullable InventorySection section,
-            @Nullable String language,
-            @Nonnull Map<String, String> translations,
-            @Nonnull Set<String> overriddenTypes) {
-
-        if (section == null || section.items == null || section.items.isEmpty()) return;
-
-        for (ItemWithAllMetadata itemPacket : section.items.values()) {
-            if (itemPacket == null || itemPacket.itemId == null || itemPacket.itemId.isEmpty()) continue;
-            if (VirtualItemRegistry.isVirtualId(itemPacket.itemId)) continue;
-
-            TooltipRegistry.ComposedTooltip composed = tooltipRegistry.compose(
-                    itemPacket.itemId, itemPacket.metadata);
-            if (composed == null) continue;
-
-            String baseItemId = itemPacket.itemId;
-
-            // Only override once per item type
-            if (overriddenTypes.contains(baseItemId)) continue;
-            overriddenTypes.add(baseItemId);
-
-            String descKey = virtualItemRegistry.getItemDescriptionKey(baseItemId);
-            String originalDesc = virtualItemRegistry.getOriginalDescription(baseItemId, language);
-            String enrichedDesc = composed.buildDescription(originalDesc);
-            translations.put(descKey, enrichedDesc);
-
-            if (composed.getNameOverride() != null) {
-                String nameKey = virtualItemRegistry.getItemNameKey(baseItemId);
-                translations.put(nameKey, composed.getNameOverride());
-            }
-        }
-    }
 
     // ═══════════════════════════════════════════════════════════════════════
     //  Auxiliary packet sending
@@ -910,58 +606,7 @@ public class TooltipPacketAdapter {
         }
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    //  Helper: build a single corrective hotbar slot
-    // ─────────────────────────────────────────────────────────────────────────
 
-    private void buildCorrectiveSlot(
-            @Nonnull CachedHotbarData cache,
-            int slot,
-            boolean isNewActive,
-            @Nonnull Map<String, ItemBase> newVirtualItems,
-            @Nonnull Map<String, String> translations,
-            @Nullable String language,
-            @Nonnull InventorySection section) {
-
-        ItemWithAllMetadata original = cache.originalItems.get(slot);
-        if (original == null) return;
-
-        TooltipRegistry.ComposedTooltip composed = cache.composedSlots.get(slot);
-        String virtualId = cache.virtualIds.get(slot);
-
-        if (composed == null || virtualId == null) return;
-
-        if (isNewActive) {
-            // New active slot → restore to real ID
-            section.items.put(slot, original.clone());
-        } else {
-            // Old active slot → swap to virtual ID
-            String baseItemId = original.itemId;
-            ItemBase virtualBase = virtualItemRegistry.getOrCreateVirtualItemBase(
-                    baseItemId, virtualId, composed.getNameOverride());
-            if (virtualBase != null) {
-                newVirtualItems.put(virtualId, virtualBase);
-
-                String descKey = VirtualItemRegistry.getVirtualDescriptionKey(virtualId);
-                if (!translations.containsKey(descKey)) {
-                    String origDesc = virtualItemRegistry.getOriginalDescription(baseItemId, language);
-                    String enrichedDesc = composed.buildDescription(origDesc);
-                    translations.put(descKey, enrichedDesc);
-                }
-
-                if (composed.getNameOverride() != null) {
-                    String nameKey = VirtualItemRegistry.getVirtualNameKey(virtualId);
-                    translations.put(nameKey, composed.getNameOverride());
-                }
-
-                ItemWithAllMetadata cloned = original.clone();
-                cloned.itemId = virtualId;
-                section.items.put(slot, cloned);
-            } else {
-                section.items.put(slot, original.clone());
-            }
-        }
-    }
 
     // ─────────────────────────────────────────────────────────────────────────
     //  Helper: compute translation diff
@@ -991,7 +636,6 @@ public class TooltipPacketAdapter {
      * The next outbound inventory packet will be fully reprocessed.
      */
     public void invalidatePlayer(@Nonnull UUID playerUuid) {
-        hotbarCache.remove(playerUuid);
         lastSentTranslations.remove(playerUuid);
         // Note: we intentionally keep lastRawInventory and knownPlayerRefs —
         // they are needed for a subsequent refreshPlayer call.
@@ -1001,7 +645,6 @@ public class TooltipPacketAdapter {
      * Clears all per-player caches for <b>every</b> tracked player.
      */
     public void invalidateAllPlayers() {
-        hotbarCache.clear();
         lastSentTranslations.clear();
     }
 

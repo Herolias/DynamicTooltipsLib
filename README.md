@@ -22,7 +22,7 @@
 - **Per-Item Unique Tooltips**: Display durability, enchantment stats, kill counters, or lore specific to an individual item instance.
 - **Mod Compatibility**: Uses a **Priority System** so multiple mods can add lines to the same item without conflict.
 
-- **Hybrid Networking**: Uses "Virtual IDs" for passive inventory slots and "Translation Overrides" for the hotbar, ensuring 100% compatibility with interaction packets.
+- **Uniform Virtual IDs**: Uses per-instance virtual item IDs for **all** inventory sections (hotbar, utility, tools, armor, storage, etc.), with an inbound filter to translate IDs back for interaction packets.
 - **High Performance**: Caches item states and packet diffs to minimize network traffic and CPU usage.
 
 ---
@@ -135,10 +135,10 @@ DynamicTooltipsApiProvider.get().refreshAllPlayers();
 
 ## Architecture
 
-DynamicTooltipsLib uses a **Hybrid Strategy** to solve the Hytale tooltip problem:
+DynamicTooltipsLib uses **Virtual Item IDs** uniformly across all inventory sections:
 
-1.  **Passive Slots (Armor, Storage)**: The library transparently swaps the real Item ID (e.g., `Sword`) with a **Virtual ID** (e.g., `Sword__dtt_hash123`). This Virtual ID has a unique translation key generated on the fly.
-2.  **Active Slots (Hotbar)**: Because Hytale relies on real Item IDs for interaction packets, we cannot swap IDs in the hotbar without breaking gameplay. Instead, the library sends a packet to **override the translation key** for the *real* Item ID, specific to the player's session.
+1.  **All Slots (Hotbar, Utility, Tools, Armor, Storage, etc.)**: The library transparently swaps the real Item ID (e.g., `Sword`) with a **Virtual ID** (e.g., `Sword__dtt_hash123`). Each virtual ID has its own unique translation key, enabling per-instance tooltips even for items of the same type.
+2.  **Inbound Translation**: Because interaction packets reference item IDs, the library's inbound filter automatically translates any virtual IDs back to real IDs in `SyncInteractionChains` and `MouseInteraction` packets, ensuring gameplay is never affected.
 
 **Memory Management**:
 The system uses bounded LRU caches (Max 10,000 items) to ensure that generating millions of unique tooltips (e.g., timestamps) does not crash the server.

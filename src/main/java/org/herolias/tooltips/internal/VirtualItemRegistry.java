@@ -69,17 +69,12 @@ public class VirtualItemRegistry {
      */
     private final ConcurrentHashMap<UUID, ConcurrentHashMap<String, String>> playerSlotVirtualIds = new ConcurrentHashMap<>();
 
-    /**
-     * Per-player tracking of which real item types currently have their description
-     * translation overridden in interactive sections.
-     */
-    private final ConcurrentHashMap<UUID, Set<String>> playerHotbarOverrides = new ConcurrentHashMap<>();
+
 
     /** Cache: base item ID → description translation key. */
     private final ConcurrentHashMap<String, String> descriptionKeyCache = new ConcurrentHashMap<>();
 
-    /** Cache: base item ID → name translation key. */
-    private final ConcurrentHashMap<String, String> nameKeyCache = new ConcurrentHashMap<>();
+
 
     /** Cache: "language:baseItemId" → original description text. */
     private final ConcurrentHashMap<String, String> originalDescriptionCache = new ConcurrentHashMap<>();
@@ -300,24 +295,7 @@ public class VirtualItemRegistry {
         return null;
     }
 
-    // ─────────────────────────────────────────────────────────────────────
-    //  Hotbar description-override tracking
-    // ─────────────────────────────────────────────────────────────────────
 
-    /**
-     * Atomically replaces the set of real item types whose description translations
-     * are currently overridden for a player's hotbar.
-     *
-     * @return the <b>previous</b> set of overridden types, or {@code null} if none
-     */
-    @Nullable
-    public Set<String> getAndUpdateHotbarOverrides(@Nonnull UUID playerUuid,
-                                                   @Nonnull Set<String> currentOverrides) {
-        if (currentOverrides.isEmpty()) {
-            return playerHotbarOverrides.remove(playerUuid);
-        }
-        return playerHotbarOverrides.put(playerUuid, new HashSet<>(currentOverrides));
-    }
 
     // ─────────────────────────────────────────────────────────────────────
     //  Description resolution
@@ -331,28 +309,7 @@ public class VirtualItemRegistry {
         return resolveDescriptionKey(baseItemId);
     }
 
-    /**
-     * Returns the name translation key for a base item type.
-     */
-    @Nonnull
-    public String getItemNameKey(@Nonnull String baseItemId) {
-        return nameKeyCache.computeIfAbsent(baseItemId, id -> {
-            try {
-                Item item = Item.getAssetMap().getAsset(id);
-                if (item != null) {
-                    // Use the item's packet to read the actual translation properties
-                    ItemBase packet = item.toPacket();
-                    if (packet != null && packet.translationProperties != null
-                            && packet.translationProperties.name != null) {
-                        return packet.translationProperties.name;
-                    }
-                }
-            } catch (Exception e) {
-                // Fall through
-            }
-            return "server.items." + id + ".name";
-        });
-    }
+
 
     /**
      * Resolves the original (unmodified) description for a base item ID.
@@ -412,7 +369,6 @@ public class VirtualItemRegistry {
     public void onPlayerLeave(@Nonnull UUID playerUuid) {
         sentToPlayer.remove(playerUuid);
         playerSlotVirtualIds.remove(playerUuid);
-        playerHotbarOverrides.remove(playerUuid);
     }
 
     /**
@@ -424,7 +380,6 @@ public class VirtualItemRegistry {
     public void invalidatePlayer(@Nonnull UUID playerUuid) {
         sentToPlayer.remove(playerUuid);
         playerSlotVirtualIds.remove(playerUuid);
-        playerHotbarOverrides.remove(playerUuid);
         // Clear built descriptions so they are recomposed with fresh text
         builtDescriptionCache.clear();
     }
@@ -433,9 +388,7 @@ public class VirtualItemRegistry {
         virtualItemCache.clear();
         sentToPlayer.clear();
         playerSlotVirtualIds.clear();
-        playerHotbarOverrides.clear();
         descriptionKeyCache.clear();
-        nameKeyCache.clear();
         originalDescriptionCache.clear();
         builtDescriptionCache.clear();
     }
