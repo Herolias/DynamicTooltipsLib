@@ -77,7 +77,7 @@ public class MyEnchantmentTooltipProvider implements TooltipProvider {
 
     @Override
     public String getProviderId() {
-        return "my-mod:enchantments";
+        return "my-mod:my-tooltips";
     }
 
     @Override
@@ -87,7 +87,7 @@ public class MyEnchantmentTooltipProvider implements TooltipProvider {
 
     @Override
     public TooltipData getTooltipData(String itemId, String metadata) {
-        if (metadata == null || !metadata.contains("enchantments")) return null;
+        if (metadata == null || !metadata.contains("my-metadata")) return null;
 
         // Parse your metadata...
         // ...
