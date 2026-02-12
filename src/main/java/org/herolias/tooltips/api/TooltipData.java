@@ -35,12 +35,14 @@ public final class TooltipData {
     private final String nameOverride;
     private final String descriptionOverride;
     private final String stableHashInput;
+    @Nullable private final ItemVisualOverrides visualOverrides;
 
     private TooltipData(Builder builder) {
         this.lines = Collections.unmodifiableList(new ArrayList<>(builder.lines));
         this.nameOverride = builder.nameOverride;
         this.descriptionOverride = builder.descriptionOverride;
         this.stableHashInput = builder.stableHashInput;
+        this.visualOverrides = builder.visualOverrides;
     }
 
     /**
@@ -73,6 +75,15 @@ public final class TooltipData {
     }
 
     /**
+     * If non-null, provides visual property overrides (model, texture, etc.) for the item.
+     * <b>Destructive</b> — highest-priority provider wins (merged field-by-field).
+     */
+    @Nullable
+    public ItemVisualOverrides getVisualOverrides() {
+        return visualOverrides;
+    }
+
+    /**
      * A deterministic string used for virtual-ID hashing.
      * <p>
      * The library combines the hash inputs from all contributing providers
@@ -90,12 +101,12 @@ public final class TooltipData {
 
     /** Whether this data only has additive lines (no destructive overrides). */
     public boolean isAdditive() {
-        return nameOverride == null && descriptionOverride == null;
+        return nameOverride == null && descriptionOverride == null && visualOverrides == null;
     }
 
     /** Whether this data has any content at all. */
     public boolean isEmpty() {
-        return lines.isEmpty() && nameOverride == null && descriptionOverride == null;
+        return lines.isEmpty() && nameOverride == null && descriptionOverride == null && visualOverrides == null;
     }
 
     @Nonnull
@@ -111,6 +122,7 @@ public final class TooltipData {
         private String nameOverride;
         private String descriptionOverride;
         private String stableHashInput = "";
+        private ItemVisualOverrides visualOverrides;
 
         private Builder() {}
 
@@ -149,6 +161,16 @@ public final class TooltipData {
         @Nonnull
         public Builder descriptionOverride(@Nonnull String description) {
             this.descriptionOverride = description;
+            return this;
+        }
+
+        /**
+         * Sets visual property overrides for the item (model, texture, etc.).
+         * <b>Destructive</b> — highest-priority provider wins (merged field-by-field).
+         */
+        @Nonnull
+        public Builder visualOverrides(@Nonnull ItemVisualOverrides visualOverrides) {
+            this.visualOverrides = visualOverrides;
             return this;
         }
 

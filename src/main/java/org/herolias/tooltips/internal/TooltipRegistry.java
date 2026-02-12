@@ -1,6 +1,7 @@
 package org.herolias.tooltips.internal;
 
 import com.hypixel.hytale.logger.HytaleLogger;
+import org.herolias.tooltips.api.ItemVisualOverrides;
 import org.herolias.tooltips.api.TooltipData;
 import org.herolias.tooltips.api.TooltipProvider;
 
@@ -62,7 +63,7 @@ public class TooltipRegistry {
 
     /** Sentinel for items with no tooltip data (caches negative results). */
     private static final ComposedTooltip EMPTY_SENTINEL = new ComposedTooltip(
-            Collections.emptyList(), null, null, "");
+            Collections.emptyList(), null, null, null, "");
 
     /** Maximum entries in the item-state cache before new entries are rejected. */
     private static final int STATE_CACHE_MAX = 4096;
@@ -98,6 +99,15 @@ public class TooltipRegistry {
         List<TooltipProvider> sorted = new ArrayList<>(providers.values());
         sorted.sort(Comparator.comparingInt(TooltipProvider::getPriority));
         providerSnapshot = Collections.unmodifiableList(sorted);
+    }
+
+    /**
+     * Retrieves a cached composed tooltip by its combined hash.
+     * Useful for looking up visual overrides when reconstructing virtual items.
+     */
+    @Nullable
+    public ComposedTooltip getComposed(@Nonnull String combinedHash) {
+        return composedCache.get(combinedHash);
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -159,8 +169,12 @@ public class TooltipRegistry {
         for (ProviderResult r : results) {
             hashBuilder.append(r.provider.getProviderId())
                     .append(':')
-                    .append(r.data.getStableHashInput())
-                    .append(';');
+                    .append(r.data.getStableHashInput());
+
+            if (r.data.getVisualOverrides() != null) {
+                r.data.getVisualOverrides().appendHashInput(hashBuilder);
+            }
+            hashBuilder.append(';');
         }
         String combinedHashInput = hashBuilder.toString();
         String combinedHash = computeHash(combinedHashInput);
@@ -188,6 +202,8 @@ public class TooltipRegistry {
                                                   @Nonnull String combinedHash) {
         String nameOverride = null;
         String descriptionOverride = null;
+        org.herolias.tooltips.api.ItemVisualOverrides.Builder visualBuilder = org.herolias.tooltips.api.ItemVisualOverrides.builder();
+        boolean hasVisuals = false;
         List<String> allLines = new ArrayList<>();
 
         // Results are already in priority order (ascending).
@@ -203,6 +219,20 @@ public class TooltipRegistry {
                 descriptionOverride = data.getDescriptionOverride();
             }
 
+            org.herolias.tooltips.api.ItemVisualOverrides vo = data.getVisualOverrides();
+            if (vo != null && !vo.isEmpty()) {
+                hasVisuals = true;
+                if (vo.getModel() != null) visualBuilder.model(vo.getModel());
+                if (vo.getTexture() != null) visualBuilder.texture(vo.getTexture());
+                if (vo.getIcon() != null) visualBuilder.icon(vo.getIcon());
+                if (vo.getAnimation() != null) visualBuilder.animation(vo.getAnimation());
+                if (vo.getSoundEventIndex() != null) visualBuilder.soundEventIndex(vo.getSoundEventIndex());
+                if (vo.getScale() != null) visualBuilder.scale(vo.getScale());
+                if (vo.getQualityIndex() != null) visualBuilder.qualityIndex(vo.getQualityIndex());
+                if (vo.getLight() != null) visualBuilder.light(vo.getLight());
+                if (vo.getParticles() != null) visualBuilder.particles(vo.getParticles());
+            }
+
             allLines.addAll(data.getLines());
         }
 
@@ -210,6 +240,7 @@ public class TooltipRegistry {
                 Collections.unmodifiableList(allLines),
                 nameOverride,
                 descriptionOverride,
+                hasVisuals ? visualBuilder.build() : null,
                 combinedHash
         );
     }
@@ -225,21 +256,25 @@ public class TooltipRegistry {
         private final List<String> additiveLines;
         private final String nameOverride;
         private final String descriptionOverride;
+        private final ItemVisualOverrides visualOverrides;
         private final String combinedHash;
 
         ComposedTooltip(List<String> additiveLines,
                         @Nullable String nameOverride,
                         @Nullable String descriptionOverride,
+                        @Nullable ItemVisualOverrides visualOverrides,
                         @Nonnull String combinedHash) {
             this.additiveLines = additiveLines;
             this.nameOverride = nameOverride;
             this.descriptionOverride = descriptionOverride;
+            this.visualOverrides = visualOverrides;
             this.combinedHash = combinedHash;
         }
 
         @Nonnull public List<String> getAdditiveLines() { return additiveLines; }
         @Nullable public String getNameOverride() { return nameOverride; }
         @Nullable public String getDescriptionOverride() { return descriptionOverride; }
+        @Nullable public ItemVisualOverrides getVisualOverrides() { return visualOverrides; }
         @Nonnull public String getCombinedHash() { return combinedHash; }
 
         /**

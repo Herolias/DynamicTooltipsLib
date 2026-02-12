@@ -29,7 +29,7 @@
 
 ## Integration
 
-See [TooltipExample](https://github.com/Herolias/TooltipExample) for an example implementation.
+See [TooltipExample](https://github.com/Herolias/TooltipExample) for an example implementation, including a `/morph` command that demonstrates visual overrides.
 
 ### 1. Gradle Dependency
 Add the library to your `build.gradle` as `compileOnly`. You do not need to shade/bundle it; the server will load it.
@@ -111,6 +111,21 @@ protected void setup() {
         api.registerProvider(new MyEnchantmentTooltipProvider());
     }
 }
+```
+
+### 3. Visual Overrides (Optional)
+You can also override client-side visual properties (model, texture, icon, etc.) for the specific item instance. These overrides are purely visual and do not affect server-side logic.
+
+```java
+return TooltipData.builder()
+    .hashInput("my_custom_sword_state") // Unique hash is required!
+    .addLine("Legendary Appearance")
+    .visualOverrides(ItemVisualOverrides.builder()
+        .model("models/custom_sword.obj")
+        .texture("textures/custom_sword.png")
+        .glint(true) // Helper to enable enchantment glint
+        .build())
+    .build();
 ```
 
 ---

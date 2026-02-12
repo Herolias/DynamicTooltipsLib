@@ -167,12 +167,14 @@ public class VirtualItemRegistry {
      * @param baseItemId  the real item ID to clone from
      * @param virtualId   the virtual item ID to assign
      * @param nameOverride if non-null, the virtual item gets its own name key
+     * @param visualOverrides optional visual property overrides
      * @return the virtual {@code ItemBase}, or {@code null} if the base item was not found
      */
     @Nullable
     public ItemBase getOrCreateVirtualItemBase(@Nonnull String baseItemId,
                                                @Nonnull String virtualId,
-                                               @Nullable String nameOverride) {
+                                               @Nullable String nameOverride,
+                                               @Nullable org.herolias.tooltips.api.ItemVisualOverrides visualOverrides) {
         // Use a cache key that includes whether there's a name override
         String cacheKey = nameOverride != null ? virtualId + ":named" : virtualId;
 
@@ -194,10 +196,23 @@ public class VirtualItemRegistry {
                 ItemBase clone = originalPacket.clone();
                 clone.id = virtualId;
 
+                // Apply visual overrides
+                if (visualOverrides != null) {
+                    if (visualOverrides.getModel() != null) clone.model = visualOverrides.getModel();
+                    if (visualOverrides.getTexture() != null) clone.texture = visualOverrides.getTexture();
+                    if (visualOverrides.getIcon() != null) clone.icon = visualOverrides.getIcon();
+                    if (visualOverrides.getAnimation() != null) clone.animation = visualOverrides.getAnimation();
+                    if (visualOverrides.getSoundEventIndex() != null) clone.soundEventIndex = visualOverrides.getSoundEventIndex();
+                    if (visualOverrides.getScale() != null) clone.scale = visualOverrides.getScale();
+                    if (visualOverrides.getQualityIndex() != null) clone.qualityIndex = visualOverrides.getQualityIndex();
+                    if (visualOverrides.getLight() != null) clone.light = visualOverrides.getLight();
+                    if (visualOverrides.getParticles() != null) clone.particles = visualOverrides.getParticles();
+                }
+
                 // Prevent virtual items from appearing in the creative inventory.
                 // categories controls which creative library tabs show the item;
                 // variant = true causes the client to hide it by default.
-                clone.categories = null;
+                // clone.categories = null; // RESTORED: Needed for client-side ability HUD resolution
                 clone.variant = true;
 
                 // Give the virtual item its own unique description translation key.
