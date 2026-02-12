@@ -24,6 +24,8 @@ public final class ItemVisualOverrides {
     @Nullable private final Integer qualityIndex;
     @Nullable private final ColorLight light;
     @Nullable private final ModelParticle[] particles;
+    @Nullable private final String playerAnimationsId;
+    @Nullable private final Boolean usePlayerAnimations;
 
     private ItemVisualOverrides(Builder builder) {
         this.model = builder.model;
@@ -35,6 +37,8 @@ public final class ItemVisualOverrides {
         this.qualityIndex = builder.qualityIndex;
         this.light = builder.light;
         this.particles = builder.particles;
+        this.playerAnimationsId = builder.playerAnimationsId;
+        this.usePlayerAnimations = builder.usePlayerAnimations;
     }
 
     // Getters
@@ -48,6 +52,8 @@ public final class ItemVisualOverrides {
     @Nullable public Integer getQualityIndex() { return qualityIndex; }
     @Nullable public ColorLight getLight() { return light; }
     @Nullable public ModelParticle[] getParticles() { return particles; }
+    @Nullable public String getPlayerAnimationsId() { return playerAnimationsId; }
+    @Nullable public Boolean getUsePlayerAnimations() { return usePlayerAnimations; }
 
     /**
      * Returns true if this instance has no overrides set.
@@ -55,7 +61,8 @@ public final class ItemVisualOverrides {
     public boolean isEmpty() {
         return model == null && texture == null && icon == null && animation == null
                 && soundEventIndex == null && scale == null && qualityIndex == null
-                && light == null && particles == null;
+                && light == null && particles == null && playerAnimationsId == null
+                && usePlayerAnimations == null;
     }
 
     /**
@@ -72,6 +79,8 @@ public final class ItemVisualOverrides {
         if (qualityIndex != null) sb.append("|q:").append(qualityIndex);
         if (light != null) sb.append("|lt:").append(light.hashCode()); // Rough hash for complex obj
         if (particles != null) sb.append("|pt:").append(particles.length); // Rough hash
+        if (playerAnimationsId != null) sb.append("|pa:").append(playerAnimationsId);
+        if (usePlayerAnimations != null) sb.append("|upa:").append(usePlayerAnimations);
     }
 
     @Nonnull
@@ -89,6 +98,8 @@ public final class ItemVisualOverrides {
         private Integer qualityIndex;
         private ColorLight light;
         private ModelParticle[] particles;
+        private String playerAnimationsId;
+        private Boolean usePlayerAnimations;
 
         private Builder() {}
 
@@ -101,6 +112,8 @@ public final class ItemVisualOverrides {
         @Nonnull public Builder qualityIndex(@Nullable Integer index) { this.qualityIndex = index; return this; }
         @Nonnull public Builder light(@Nullable ColorLight light) { this.light = light; return this; }
         @Nonnull public Builder particles(@Nullable ModelParticle[] particles) { this.particles = particles; return this; }
+        @Nonnull public Builder playerAnimationsId(@Nullable String playerAnimationsId) { this.playerAnimationsId = playerAnimationsId; return this; }
+        @Nonnull public Builder usePlayerAnimations(@Nullable Boolean usePlayerAnimations) { this.usePlayerAnimations = usePlayerAnimations; return this; }
 
         @Nonnull
         public ItemVisualOverrides build() {

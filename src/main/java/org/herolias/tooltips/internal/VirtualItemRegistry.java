@@ -207,6 +207,8 @@ public class VirtualItemRegistry {
                     if (visualOverrides.getQualityIndex() != null) clone.qualityIndex = visualOverrides.getQualityIndex();
                     if (visualOverrides.getLight() != null) clone.light = visualOverrides.getLight();
                     if (visualOverrides.getParticles() != null) clone.particles = visualOverrides.getParticles();
+                    if (visualOverrides.getPlayerAnimationsId() != null) clone.playerAnimationsId = visualOverrides.getPlayerAnimationsId();
+                    if (visualOverrides.getUsePlayerAnimations() != null) clone.usePlayerAnimations = visualOverrides.getUsePlayerAnimations();
                 }
 
                 // Prevent virtual items from appearing in the creative inventory.

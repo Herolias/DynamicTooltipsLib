@@ -121,9 +121,10 @@ return TooltipData.builder()
     .hashInput("my_custom_sword_state") // Unique hash is required!
     .addLine("Legendary Appearance")
     .visualOverrides(ItemVisualOverrides.builder()
-        .model("models/custom_sword.obj")
+        .model("models/custom_sword.blockymodel")
         .texture("textures/custom_sword.png")
-        .glint(true) // Helper to enable enchantment glint
+        .playerAnimationsId("two_handed") // Override the player's holding animation
+        .usePlayerAnimations(true) // Force enable player animations
         .build())
     .build();
 ```

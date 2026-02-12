@@ -557,6 +557,21 @@ public class TooltipPacketAdapter {
                 }
             }
         }
+
+        // Fix for off-hand (left hand) items not showing visual overrides.
+        // The off-hand slot maps to "utility:0" in our registry.
+        if (equipment.leftHandItemId != null && !VirtualItemRegistry.isVirtualId(equipment.leftHandItemId)) {
+            UUID playerUuid = playerRef.getUuid();
+            // The off-hand is always utility slot 0
+            String virtualId = virtualItemRegistry.getSlotVirtualId(playerUuid, "utility:0");
+            
+            if (virtualId != null) {
+                String baseId = VirtualItemRegistry.getBaseItemId(virtualId);
+                if (baseId != null && baseId.equals(equipment.leftHandItemId)) {
+                    equipment.leftHandItemId = virtualId;
+                }
+            }
+        }
     }
 
     // ───────────────────────────────────────────────────────────────────────
