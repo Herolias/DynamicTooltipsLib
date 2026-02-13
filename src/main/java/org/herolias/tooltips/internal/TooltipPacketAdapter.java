@@ -223,7 +223,7 @@ public class TooltipPacketAdapter {
             if (chain.activeHotbarSlot >= 0) {
                  playerActiveHotbarSlots.put(playerRef.getUuid(), chain.activeHotbarSlot);
             }
-            if (chain.data != null && chain.data.targetSlot != Integer.MIN_VALUE) {
+            if (chain.data != null && chain.data.targetSlot >= 0) {
                  playerActiveHotbarSlots.put(playerRef.getUuid(), chain.data.targetSlot);
             }
             translateInboundChainItemIds(chain);
@@ -564,7 +564,7 @@ public class TooltipPacketAdapter {
             UUID playerUuid = playerRef.getUuid();
             // The off-hand is always utility slot 0
             String virtualId = virtualItemRegistry.getSlotVirtualId(playerUuid, "utility:0");
-            
+
             if (virtualId != null) {
                 String baseId = VirtualItemRegistry.getBaseItemId(virtualId);
                 if (baseId != null && baseId.equals(equipment.leftHandItemId)) {
