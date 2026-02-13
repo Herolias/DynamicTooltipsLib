@@ -5,6 +5,11 @@
 **DynamicTooltipsLib** overcomes Hytale's static tooltip limitation by transparently creating virtual item definitions. This allows two items of the same type (e.g., two Iron Swords) to display completely different descriptions, based on their metadata, NBT, or external state.
 
 ---
+Why you should use this library:
+The lib manages mod compatibility for you. It uses a priority system so multiple mods can add lines to the same item without conflict.
+I will add more features and update the library regularly.
+
+---
 
 ## Table of Contents
 
@@ -114,7 +119,7 @@ protected void setup() {
 ```
 
 ### 3. Visual Overrides (Optional)
-You can also override client-side visual properties (model, texture, icon, etc.) for the specific item instance. These overrides are purely visual and do not affect server-side logic.
+You can also override client-side visual properties for a specific item instance. These overrides are purely visual and do not affect server-side logic.
 
 ```java
 return TooltipData.builder()
@@ -123,11 +128,50 @@ return TooltipData.builder()
     .visualOverrides(ItemVisualOverrides.builder()
         .model("models/custom_sword.blockymodel")
         .texture("textures/custom_sword.png")
-        .playerAnimationsId("two_handed") // Override the player's holding animation
-        .usePlayerAnimations(true) // Force enable player animations
+        .trails(myTrailArray)               // Add trail effects
+        .playerAnimationsId("two_handed")   // Override holding animation
+        .usePlayerAnimations(true)
+        .light(myColorLight)                // Add a glow
+        .reticleIndex(3)                    // Change the crosshair
         .build())
     .build();
 ```
+
+#### Available Visual Overrides
+
+All fields are optional — only non-null values override the original item.
+
+| Field | Type | Description |
+| :--- | :--- | :--- |
+| **Model & Appearance** | | |
+| `model` | `String` | 3D model asset path |
+| `texture` | `String` | Texture asset path |
+| `scale` | `Float` | Model scale multiplier |
+| `qualityIndex` | `Integer` | Item quality/rarity tier |
+| `clipsGeometry` | `Boolean` | Whether the model clips through world geometry |
+| `set` | `String` | Item set membership (visual grouping) |
+| **UI & Icon** | | |
+| `icon` | `String` | Inventory icon asset path |
+| `iconProperties` | `AssetIconProperties` | Icon scale, translation, and rotation in UI |
+| `reticleIndex` | `Integer` | Crosshair/reticle graphic index |
+| `renderDeployablePreview` | `Boolean` | Show placement preview ghost |
+| `displayEntityStatsHUD` | `int[]` | Which entity stats are displayed on the HUD |
+| `categories` | `String[]` | Creative library category tabs |
+| **Effects** | | |
+| `light` | `ColorLight` | Light emission (color + radius) |
+| `particles` | `ModelParticle[]` | Particle effects on the item model |
+| `firstPersonParticles` | `ModelParticle[]` | Particles visible only in first-person |
+| `trails` | `ModelTrail[]` | Trail effects on the item model |
+| **Animation** | | |
+| `animation` | `String` | Item animation asset path |
+| `droppedItemAnimation` | `String` | Animation when item is on the ground |
+| `playerAnimationsId` | `String` | Player holding/using animation set |
+| `usePlayerAnimations` | `Boolean` | Force enable/disable player animations |
+| `itemAppearanceConditions` | `Map<Integer, ItemAppearanceCondition[]>` | Conditional visual states (e.g. charge level) |
+| `pullbackConfig` | `ItemPullbackConfiguration` | Visual pullback positions for bows/crossbows |
+| **Sound** | | |
+| `soundEventIndex` | `Integer` | Sound event index for interactions |
+| `itemSoundSetIndex` | `Integer` | Sound set index for item sounds |
 
 ---
 

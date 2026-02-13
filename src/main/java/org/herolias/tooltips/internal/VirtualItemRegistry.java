@@ -209,6 +209,19 @@ public class VirtualItemRegistry {
                     if (visualOverrides.getParticles() != null) clone.particles = visualOverrides.getParticles();
                     if (visualOverrides.getPlayerAnimationsId() != null) clone.playerAnimationsId = visualOverrides.getPlayerAnimationsId();
                     if (visualOverrides.getUsePlayerAnimations() != null) clone.usePlayerAnimations = visualOverrides.getUsePlayerAnimations();
+                    if (visualOverrides.getReticleIndex() != null) clone.reticleIndex = visualOverrides.getReticleIndex();
+                    if (visualOverrides.getIconProperties() != null) clone.iconProperties = visualOverrides.getIconProperties();
+                    if (visualOverrides.getFirstPersonParticles() != null) clone.firstPersonParticles = visualOverrides.getFirstPersonParticles();
+                    if (visualOverrides.getTrails() != null) clone.trails = visualOverrides.getTrails();
+                    if (visualOverrides.getDroppedItemAnimation() != null) clone.droppedItemAnimation = visualOverrides.getDroppedItemAnimation();
+                    if (visualOverrides.getItemSoundSetIndex() != null) clone.itemSoundSetIndex = visualOverrides.getItemSoundSetIndex();
+                    if (visualOverrides.getItemAppearanceConditions() != null) clone.itemAppearanceConditions = visualOverrides.getItemAppearanceConditions();
+                    if (visualOverrides.getPullbackConfig() != null) clone.pullbackConfig = visualOverrides.getPullbackConfig();
+                    if (visualOverrides.getClipsGeometry() != null) clone.clipsGeometry = visualOverrides.getClipsGeometry();
+                    if (visualOverrides.getRenderDeployablePreview() != null) clone.renderDeployablePreview = visualOverrides.getRenderDeployablePreview();
+                    if (visualOverrides.getSet() != null) clone.set = visualOverrides.getSet();
+                    if (visualOverrides.getCategories() != null) clone.categories = visualOverrides.getCategories();
+                    if (visualOverrides.getDisplayEntityStatsHUD() != null) clone.displayEntityStatsHUD = visualOverrides.getDisplayEntityStatsHUD();
                 }
 
                 // Prevent virtual items from appearing in the creative inventory.

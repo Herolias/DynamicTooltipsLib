@@ -231,6 +231,19 @@ public class TooltipRegistry {
                 if (vo.getQualityIndex() != null) visualBuilder.qualityIndex(vo.getQualityIndex());
                 if (vo.getLight() != null) visualBuilder.light(vo.getLight());
                 if (vo.getParticles() != null) visualBuilder.particles(vo.getParticles());
+                if (vo.getReticleIndex() != null) visualBuilder.reticleIndex(vo.getReticleIndex());
+                if (vo.getIconProperties() != null) visualBuilder.iconProperties(vo.getIconProperties());
+                if (vo.getFirstPersonParticles() != null) visualBuilder.firstPersonParticles(vo.getFirstPersonParticles());
+                if (vo.getTrails() != null) visualBuilder.trails(vo.getTrails());
+                if (vo.getDroppedItemAnimation() != null) visualBuilder.droppedItemAnimation(vo.getDroppedItemAnimation());
+                if (vo.getItemSoundSetIndex() != null) visualBuilder.itemSoundSetIndex(vo.getItemSoundSetIndex());
+                if (vo.getItemAppearanceConditions() != null) visualBuilder.itemAppearanceConditions(vo.getItemAppearanceConditions());
+                if (vo.getPullbackConfig() != null) visualBuilder.pullbackConfig(vo.getPullbackConfig());
+                if (vo.getClipsGeometry() != null) visualBuilder.clipsGeometry(vo.getClipsGeometry());
+                if (vo.getRenderDeployablePreview() != null) visualBuilder.renderDeployablePreview(vo.getRenderDeployablePreview());
+                if (vo.getSet() != null) visualBuilder.set(vo.getSet());
+                if (vo.getCategories() != null) visualBuilder.categories(vo.getCategories());
+                if (vo.getDisplayEntityStatsHUD() != null) visualBuilder.displayEntityStatsHUD(vo.getDisplayEntityStatsHUD());
             }
 
             allLines.addAll(data.getLines());
