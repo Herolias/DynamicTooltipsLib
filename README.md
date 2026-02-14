@@ -73,10 +73,10 @@ Add it to your `manifest.json`.
 
 ## Usage
 
+### 1. Implement `TooltipProvider`
 
-Implement a `TooltipProvider` to generate tooltips programmatically.
+Create a class that implements the `TooltipProvider` interface. This is where you define the logic for your tooltips.
 
-#### 1. Implement the Interface
 ```java
 public class MyEnchantmentTooltipProvider implements TooltipProvider {
 
@@ -99,14 +99,15 @@ public class MyEnchantmentTooltipProvider implements TooltipProvider {
 
         return TooltipData.builder()
             .hashInput("sharpness:5") // REQUIRED: Unique hash for caching
-            .addLine("<color is='#FFAA00'>Sharpness V</color>")
+            .addLine("<color is=\"#FFAA00\">Sharpness V</color>")
             .build();
     }
 }
 ```
 
-#### 2. Register the Provider
-Register it during your plugin's setup.
+### 2. Register the Provider
+
+Register your provider during your plugin's setup phase.
 
 ```java
 @Override
@@ -118,16 +119,41 @@ protected void setup() {
 }
 ```
 
-### 3. Visual Overrides (Optional)
-You can also override client-side visual properties for a specific item instance. These overrides are purely visual and do not affect server-side logic.
+---
+
+## API Reference
+
+### TooltipData.Builder
+
+The `TooltipData.builder()` provides a fluent API for constructing tooltip data.
+
+#### Additive Methods
+*   `addLine(String line)`: Adds a single line to the end of the tooltip. Supports Hytale's rich text formatting (e.g., `<color>`).
+*   `addLines(List<String> lines)`: Adds multiple lines at once.
+
+#### Override Methods (Destructive)
+These methods replace existing item properties. If multiple providers set these, the one with the highest priority wins.
+
+*   `nameOverride(String name)`: Replaces the item's display name.
+*   `descriptionOverride(String description)`: Replaces the **entire** description (original + additive lines).
+*   `addLineOverride(String line)`: Adds a line to the description override. Useful if you want to build the override line-by-line. *Note: `descriptionOverride(String)` takes precedence.*
+*   `visualOverrides(ItemVisualOverrides overrides)`: Applies client-side visual changes (model, texture, etc.).
+
+#### State Methods
+*   `hashInput(String input)`: **Required.** A deterministic string representing the item's state (e.g., `enchant:sharpness:5`). Used for caching virtual IDs.
+
+### Visual Overrides Reference
+
+Use `ItemVisualOverrides.builder()` to construct client-side visual overrides. All fields are optional; only non-null values will override the original item's properties.
 
 ```java
 return TooltipData.builder()
     .hashInput("my_custom_sword_state") // Unique hash is required!
-    .addLine("Legendary Appearance")
+    .addLineOverride("<color is=\"#FF0000\">Override Line 1</color>") // Replaces original description, destructive. Make sure to test for compatibility with other mods.
+    .addLineOverride("<color is=\"#00FF00\">Override Line 2</color>")
     .visualOverrides(ItemVisualOverrides.builder()
-        .model("models/custom_sword.blockymodel")
-        .texture("textures/custom_sword.png")
+    .model("models/custom_sword.blockymodel")
+    .texture("textures/custom_sword.png")
         .trails(myTrailArray)               // Add trail effects
         .playerAnimationsId("two_handed")   // Override holding animation
         .usePlayerAnimations(true)
@@ -137,9 +163,8 @@ return TooltipData.builder()
     .build();
 ```
 
-#### Available Visual Overrides
-
-All fields are optional — only non-null values override the original item.
+#### Supported Fields
+The following fields map directly to `ItemBase` properties.
 
 | Field | Type | Description |
 | :--- | :--- | :--- |
@@ -172,6 +197,10 @@ All fields are optional — only non-null values override the original item.
 | **Sound** | | |
 | `soundEventIndex` | `Integer` | Sound event index for interactions |
 | `itemSoundSetIndex` | `Integer` | Sound set index for item sounds |
+| **Dropped Item** | | |
+| `itemEntity` | `ItemEntityConfig` | Particle system, color, and visibility for dropped items |
+| **Durability** | | |
+| `durability` | `Double` | Max durability shown in tooltip (visual only) |
 
 ---
 

@@ -3,6 +3,7 @@ package org.herolias.tooltips.api;
 import com.hypixel.hytale.protocol.AssetIconProperties;
 import com.hypixel.hytale.protocol.ColorLight;
 import com.hypixel.hytale.protocol.ItemAppearanceCondition;
+import com.hypixel.hytale.protocol.ItemEntityConfig;
 import com.hypixel.hytale.protocol.ItemPullbackConfiguration;
 import com.hypixel.hytale.protocol.ModelParticle;
 import com.hypixel.hytale.protocol.ModelTrail;
@@ -48,6 +49,8 @@ public final class ItemVisualOverrides {
     @Nullable private final String set;
     @Nullable private final String[] categories;
     @Nullable private final int[] displayEntityStatsHUD;
+    @Nullable private final ItemEntityConfig itemEntity;
+    @Nullable private final Double durability;
 
     private ItemVisualOverrides(Builder builder) {
         this.model = builder.model;
@@ -74,6 +77,8 @@ public final class ItemVisualOverrides {
         this.set = builder.set;
         this.categories = builder.categories;
         this.displayEntityStatsHUD = builder.displayEntityStatsHUD;
+        this.itemEntity = builder.itemEntity;
+        this.durability = builder.durability;
     }
 
     // ── Getters (existing) ──
@@ -105,6 +110,8 @@ public final class ItemVisualOverrides {
     @Nullable public String getSet() { return set; }
     @Nullable public String[] getCategories() { return categories; }
     @Nullable public int[] getDisplayEntityStatsHUD() { return displayEntityStatsHUD; }
+    @Nullable public ItemEntityConfig getItemEntity() { return itemEntity; }
+    @Nullable public Double getDurability() { return durability; }
 
     /**
      * Returns true if this instance has no overrides set.
@@ -119,7 +126,8 @@ public final class ItemVisualOverrides {
                 && droppedItemAnimation == null && itemSoundSetIndex == null
                 && itemAppearanceConditions == null && pullbackConfig == null
                 && clipsGeometry == null && renderDeployablePreview == null
-                && set == null && categories == null && displayEntityStatsHUD == null;
+                && set == null && categories == null && displayEntityStatsHUD == null
+                && itemEntity == null && durability == null;
     }
 
     /**
@@ -151,6 +159,8 @@ public final class ItemVisualOverrides {
         if (set != null) sb.append("|set:").append(set);
         if (categories != null) sb.append("|cat:").append(Arrays.hashCode(categories));
         if (displayEntityStatsHUD != null) sb.append("|desh:").append(Arrays.hashCode(displayEntityStatsHUD));
+        if (itemEntity != null) sb.append("|ie:").append(itemEntity.hashCode());
+        if (durability != null) sb.append("|dur:").append(durability);
     }
 
     @Nonnull
@@ -185,6 +195,8 @@ public final class ItemVisualOverrides {
         private String set;
         private String[] categories;
         private int[] displayEntityStatsHUD;
+        private ItemEntityConfig itemEntity;
+        private Double durability;
 
         private Builder() {}
 
@@ -228,6 +240,10 @@ public final class ItemVisualOverrides {
         @Nonnull public Builder categories(@Nullable String[] categories) { this.categories = categories; return this; }
         /** Override which entity stats are displayed on the HUD for this item. */
         @Nonnull public Builder displayEntityStatsHUD(@Nullable int[] statsHUD) { this.displayEntityStatsHUD = statsHUD; return this; }
+        /** Override the dropped item entity config (particle system, color, showItemParticles). */
+        @Nonnull public Builder itemEntity(@Nullable ItemEntityConfig config) { this.itemEntity = config; return this; }
+        /** Override the max durability shown in the tooltip (purely visual). */
+        @Nonnull public Builder durability(@Nullable Double durability) { this.durability = durability; return this; }
 
         @Nonnull
         public ItemVisualOverrides build() {

@@ -2,6 +2,7 @@ package org.herolias.tooltips.internal;
 
 import com.hypixel.hytale.logger.HytaleLogger;
 import com.hypixel.hytale.protocol.ItemBase;
+import com.hypixel.hytale.protocol.ItemEntityConfig;
 import com.hypixel.hytale.protocol.ItemTranslationProperties;
 import com.hypixel.hytale.server.core.asset.type.item.config.Item;
 import com.hypixel.hytale.server.core.modules.i18n.I18nModule;
@@ -79,12 +80,21 @@ public class VirtualItemRegistry {
     /** Cache: "language:baseItemId" → original description text. */
     private final ConcurrentHashMap<String, String> originalDescriptionCache = new ConcurrentHashMap<>();
 
+    /** Cache: "language:baseItemId" → original name text. */
+    private final ConcurrentHashMap<String, String> originalNameCache = new ConcurrentHashMap<>();
+
     /**
      * Cache: virtualId → built description string.
      * <p>
      * Bounded LRU cache.
      */
     private final Map<String, String> builtDescriptionCache = Collections.synchronizedMap(new LRUCache<>(10000));
+
+    /**
+     * Lazily-populated cache: qualityIndex → ItemEntityConfig (protocol form).
+     * Used to auto-resolve rarity particles when qualityIndex is overridden.
+     */
+    private volatile Map<Integer, ItemEntityConfig> qualityEntityConfigCache;
 
     /**
      * Simple thread-safe LRU Cache implementation.
@@ -115,7 +125,8 @@ public class VirtualItemRegistry {
      * @return a virtual ID, e.g. {@code "Tool_Pickaxe_Adamantite__dtt_a1b2c3d4"}
      */
     @Nonnull
-    public String generateVirtualId(@Nonnull String baseItemId, @Nonnull String combinedHash) {
+    public static String generateVirtualId(@Nonnull String baseItemId, @Nonnull String combinedHash) {
+        // BaseID__dtt_HASH
         return baseItemId + VIRTUAL_SEPARATOR + combinedHash;
     }
 
@@ -222,6 +233,21 @@ public class VirtualItemRegistry {
                     if (visualOverrides.getSet() != null) clone.set = visualOverrides.getSet();
                     if (visualOverrides.getCategories() != null) clone.categories = visualOverrides.getCategories();
                     if (visualOverrides.getDisplayEntityStatsHUD() != null) clone.displayEntityStatsHUD = visualOverrides.getDisplayEntityStatsHUD();
+                    if (visualOverrides.getItemEntity() != null) clone.itemEntity = visualOverrides.getItemEntity();
+                    if (visualOverrides.getDurability() != null) clone.durability = visualOverrides.getDurability();
+                }
+
+                // ── Auto-resolve rarity particles ──
+                // When qualityIndex is overridden but itemEntity is NOT explicitly
+                // set by the provider, copy the particle config from a reference
+                // item with the target quality so dropped items glow correctly.
+                if (visualOverrides != null
+                        && visualOverrides.getQualityIndex() != null
+                        && visualOverrides.getItemEntity() == null) {
+                    ItemEntityConfig refConfig = resolveQualityEntityConfig(visualOverrides.getQualityIndex());
+                    if (refConfig != null) {
+                        clone.itemEntity = refConfig.clone();
+                    }
                 }
 
                 // Prevent virtual items from appearing in the creative inventory.
@@ -252,6 +278,50 @@ public class VirtualItemRegistry {
                 return null;
             }
         });
+    }
+
+    /**
+     * Lazily resolves the {@link ItemEntityConfig} (particle system, color, etc.)
+     * associated with a given quality tier by scanning the item registry.
+     * <p>
+     * The result is cached so the registry is only scanned once.
+     *
+     * @param qualityIndex the target quality tier index
+     * @return the matching config, or {@code null} if none was found
+     */
+    @Nullable
+    private ItemEntityConfig resolveQualityEntityConfig(int qualityIndex) {
+        Map<Integer, ItemEntityConfig> cache = this.qualityEntityConfigCache;
+        if (cache == null) {
+            synchronized (this) {
+                cache = this.qualityEntityConfigCache;
+                if (cache == null) {
+                    cache = new HashMap<>();
+                    try {
+                        Map<String, Item> items = Item.getAssetMap().getAssetMap();
+                        for (Item item : items.values()) {
+                            int qi = item.getQualityIndex();
+                            if (qi > 0 && !cache.containsKey(qi)) {
+                                com.hypixel.hytale.server.core.asset.type.item.config.ItemEntityConfig serverCfg =
+                                        item.getItemEntityConfig();
+                                if (serverCfg != null) {
+                                    // Convert the server-side config to the protocol form
+                                    ItemBase packet = item.toPacket();
+                                    if (packet.itemEntity != null) {
+                                        cache.put(qi, packet.itemEntity.clone());
+                                    }
+                                }
+                            }
+                        }
+                        LOGGER.atInfo().log("Cached ItemEntityConfig for " + cache.size() + " quality tiers");
+                    } catch (Exception e) {
+                        LOGGER.atWarning().log("Failed to build quality→entity config cache: " + e.getMessage());
+                    }
+                    this.qualityEntityConfigCache = cache;
+                }
+            }
+        }
+        return cache.get(qualityIndex);
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -360,6 +430,27 @@ public class VirtualItemRegistry {
         });
     }
 
+    /**
+     * Resolves the original (unmodified) name for a base item ID.
+     */
+    @Nullable
+    public String getOriginalName(@Nonnull String baseItemId, @Nullable String language) {
+        String cacheKey = (language != null ? language : "_default") + ":" + baseItemId;
+        return originalNameCache.computeIfAbsent(cacheKey, k -> {
+            try {
+                Item item = Item.getAssetMap().getAsset(baseItemId);
+                if (item == null) return null;
+                String nameKey = item.getTranslationKey();
+                I18nModule i18n = I18nModule.get();
+                if (i18n == null) return null;
+                String msg = i18n.getMessage(language, nameKey);
+                return msg;
+            } catch (Exception e) {
+                return null;
+            }
+        });
+    }
+
     @Nonnull
     private String resolveDescriptionKey(@Nonnull String baseItemId) {
         return descriptionKeyCache.computeIfAbsent(baseItemId, id -> {
@@ -420,6 +511,7 @@ public class VirtualItemRegistry {
         playerSlotVirtualIds.clear();
         descriptionKeyCache.clear();
         originalDescriptionCache.clear();
+        originalNameCache.clear();
         builtDescriptionCache.clear();
     }
 }

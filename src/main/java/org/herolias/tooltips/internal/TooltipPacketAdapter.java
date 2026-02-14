@@ -18,6 +18,9 @@ import com.hypixel.hytale.protocol.packets.window.UpdateWindow;
 import com.hypixel.hytale.protocol.packets.inventory.SetActiveSlot;
 import com.hypixel.hytale.protocol.packets.interface_.CustomPage;
 import com.hypixel.hytale.protocol.packets.interface_.CustomUICommand;
+import com.hypixel.hytale.protocol.packets.interface_.Notification;
+import com.hypixel.hytale.protocol.FormattedMessage;
+import com.hypixel.hytale.server.core.Message;
 import com.hypixel.hytale.server.core.HytaleServer;
 import com.hypixel.hytale.server.core.io.adapter.PacketAdapters;
 import com.hypixel.hytale.server.core.io.adapter.PacketFilter;
@@ -29,6 +32,7 @@ import org.bson.BsonValue;
 import com.hypixel.hytale.protocol.packets.entities.EntityUpdates;
 import com.hypixel.hytale.protocol.EntityUpdate;
 import com.hypixel.hytale.protocol.ComponentUpdate;
+import com.hypixel.hytale.protocol.ComponentUpdateType;
 import com.hypixel.hytale.protocol.Equipment;
 import com.hypixel.hytale.protocol.packets.player.SetClientId;
 
@@ -298,6 +302,74 @@ public class TooltipPacketAdapter {
                 processWindowInventory(playerRef, updateWindow.inventory);
             } else if (packet instanceof CustomPage customPage) {
                 processCustomPage(playerRef, customPage);
+            } else if (packet instanceof Notification) {
+                // ─────────────────────────────────────────────────────────────────────
+                //  Pickup Notifications (Dropped Item Name Fix)
+                // ─────────────────────────────────────────────────────────────────────
+                Notification notification = (Notification) packet;
+                // Target the "picked up item" notification
+                if (notification.message != null && "server.general.pickedUpItem".equals(notification.message.messageId)
+                        && notification.item != null) {
+
+                    String itemId = notification.item.itemId;
+                    String metadata = notification.item.metadata;
+
+                    // If the notification already has a virtual ID (e.g. from a previous update),
+                    // we should look up the base ID to correctly resolve the tooltip.
+                    if (VirtualItemRegistry.isVirtualId(itemId)) {
+                        String baseId = VirtualItemRegistry.getBaseItemId(itemId);
+                        if (baseId != null) {
+                            itemId = baseId;
+                        }
+                    }
+
+                    // We need to resolve the virtual item based on the item in the notification
+                    TooltipRegistry.ComposedTooltip composed = tooltipRegistry.compose(itemId, metadata);
+
+                    if (composed != null) {
+                        String combinedHash = composed.getCombinedHash();
+                        String virtualId = VirtualItemRegistry.generateVirtualId(itemId, combinedHash);
+                        
+                        // Create the virtual item base using the resolved overrides
+                        ItemBase virtualItem = virtualItemRegistry.getOrCreateVirtualItemBase(
+                                itemId,
+                                virtualId,
+                                composed.getNameOverride(),
+                                composed.getVisualOverrides()
+                        );
+
+                        if (virtualItem != null) {
+                            // Create a new ItemWithAllMetadata with:
+                            // - Virtual Item ID
+                            // - Virtual Max Durability (if overridden)
+                            // - Original Quantity & Current Durability (preserve state)
+                            ItemWithAllMetadata newItem = new ItemWithAllMetadata(
+                                    virtualItem.id, // Use the virtual ID
+                                    notification.item.quantity,
+                                    notification.item.durability,
+                                    virtualItem.durability, // Apply visual max durability override
+                                    notification.item.overrideDroppedItemAnimation,
+                                    notification.item.metadata
+                            );
+                            
+                            // Replace the item in the packet
+                            notification.item = newItem;
+
+                            // Also update the message param "item" which shows the name
+                            // We must update the "item" entry in the messageParams map
+                            if (notification.message.messageParams != null && notification.message.messageParams.containsKey("item")) {
+                                 // Use the updated name key from the virtual item
+                                String nameKey = virtualItem.translationProperties != null ? virtualItem.translationProperties.name : itemId;
+                                // Create a new FormattedMessage for the name
+                                // We use Message helper to easily create a translation message
+                                FormattedMessage nameMessage = Message.translation(nameKey).getFormattedMessage();
+                                
+                                // Replace the param
+                                notification.message.messageParams.put("item", nameMessage);
+                            }
+                        }
+                    }
+                }
             }
         } catch (Exception e) {
             LOGGER.atWarning().log("Error in outbound packet adapter for "
@@ -513,28 +585,92 @@ public class TooltipPacketAdapter {
     // ───────────────────────────────────────────────────────────────────────
 
     /**
-     * Inspects outbound EntityUpdates. If an update targets the local player and
-     * modifies the held item (Equipment), we replace the real Item ID with the
-     * corresponding Virtual ID from the active hotbar slot.
-     * <p>
-     * This prevents the client from reverting visual overrides (model/texture)
-     * when the server canonicalizes the player's state.
+     * Inspects outbound EntityUpdates for two purposes:
+     * <ol>
+     *   <li><b>Player equipment:</b> If an update targets the local player and
+     *       modifies Equipment, we replace the real Item ID with the virtual ID
+     *       from the active hotbar/utility slot to prevent visual reversion.</li>
+     *   <li><b>Dropped item entities:</b> If any entity carries an {@code Item(5)}
+     *       component, we resolve the virtual ID via the tooltip registry using
+     *       the item's {@code itemId + metadata}. This makes dropped items on the
+     *       ground render with overridden models/textures.</li>
+     * </ol>
      */
     private void processEntityUpdates(@Nonnull PlayerRef playerRef, @Nonnull EntityUpdates packet) {
         if (packet.updates == null || packet.updates.length == 0) return;
 
-        Integer entityId = playerEntityIds.get(playerRef.getUuid());
-        if (entityId == null) return;
+        Integer localEntityId = playerEntityIds.get(playerRef.getUuid());
+
+        Map<String, ItemBase> newVirtualItems = null;
+        Map<String, String> translations = null;
 
         for (EntityUpdate update : packet.updates) {
-            // Only care about updates to the player themselves
-            if (update.networkId == entityId && update.updates != null) {
-                for (ComponentUpdate comp : update.updates) {
-                    if (comp.equipment != null) {
-                        processEquipmentUpdate(playerRef, comp.equipment);
+            if (update.updates == null) continue;
+
+            for (ComponentUpdate comp : update.updates) {
+                // ── Player Equipment (visual reversion fix) ──
+                if (localEntityId != null && update.networkId == localEntityId && comp.equipment != null) {
+                    processEquipmentUpdate(playerRef, comp.equipment);
+                }
+
+                // ── Dropped Item entities (model/texture override) ──
+                if (comp.type == ComponentUpdateType.Item && comp.item != null
+                        && comp.item.itemId != null && !comp.item.itemId.isEmpty()
+                        && !VirtualItemRegistry.isVirtualId(comp.item.itemId)) {
+
+                    TooltipRegistry.ComposedTooltip composed = tooltipRegistry.compose(
+                            comp.item.itemId, comp.item.metadata);
+                    if (composed != null && composed.getVisualOverrides() != null
+                            && !composed.getVisualOverrides().isEmpty()) {
+
+                        String baseItemId = comp.item.itemId;
+
+                        // For dropped items, always resolve an effective name so the
+                        // virtual ItemBase uses a virtual name key in its
+                        // translationProperties — otherwise the client can't resolve
+                        // the name on pickup.
+                        String effectiveName = composed.getNameOverride();
+                        if (effectiveName == null) {
+                            effectiveName = virtualItemRegistry.getOriginalName(
+                                    baseItemId, playerRef.getLanguage());
+                        }
+
+                        String virtualId = virtualItemRegistry.generateVirtualId(
+                                baseItemId, composed.getCombinedHash());
+                        ItemBase virtualBase = virtualItemRegistry.getOrCreateVirtualItemBase(
+                                baseItemId, virtualId, effectiveName,
+                                composed.getVisualOverrides());
+
+                        if (virtualBase != null) {
+                            comp.item.itemId = virtualId;
+
+                            // Lazily initialise auxiliary maps
+                            if (newVirtualItems == null) {
+                                newVirtualItems = new LinkedHashMap<>();
+                                translations = new LinkedHashMap<>();
+                            }
+                            newVirtualItems.put(virtualId, virtualBase);
+
+                            String descKey = VirtualItemRegistry.getVirtualDescriptionKey(virtualId);
+                            String originalDesc = virtualItemRegistry.getOriginalDescription(
+                                    baseItemId, playerRef.getLanguage());
+                            String enrichedDesc = composed.buildDescription(originalDesc);
+                            translations.put(descKey, enrichedDesc);
+
+                            // Always send the name translation under the virtual key
+                            String nameKey = VirtualItemRegistry.getVirtualNameKey(virtualId);
+                            if (effectiveName != null) {
+                                translations.put(nameKey, effectiveName);
+                            }
+                        }
                     }
                 }
             }
+        }
+
+        // Send auxiliary packets (UpdateItems + translations) if any items were virtualised
+        if (newVirtualItems != null && !newVirtualItems.isEmpty()) {
+            sendAuxiliaryPackets(playerRef, newVirtualItems, translations);
         }
     }
 
@@ -554,7 +690,38 @@ public class TooltipPacketAdapter {
                 // If the packet assumes the base item, but we know it's virtual, swap it.
                 if (baseId != null && baseId.equals(equipment.rightHandItemId)) {
                     equipment.rightHandItemId = virtualId;
+                } else {
+                     // Fallback: If the active slot didn't match, scan the entire hotbar.
+                     // usage case: The client switched slots (packet in flight), server
+                     // sent EntityUpdate reacting to it, but our inbound listener hasn't
+                     // updated playerActiveHotbarSlots yet.
+                     for (int i = 0; i < 9; i++) {
+                         if (i == slot) continue; // Already checked
+                         String otherVirtualId = virtualItemRegistry.getSlotVirtualId(playerUuid, "hotbar:" + i);
+                         if (otherVirtualId != null) {
+                             String otherBaseId = VirtualItemRegistry.getBaseItemId(otherVirtualId);
+                             if (otherBaseId != null && otherBaseId.equals(equipment.rightHandItemId)) {
+                                 equipment.rightHandItemId = otherVirtualId;
+                                 // Opportunistically update the active slot?
+                                 // Maybe, but let's be safe and just fix the visual.
+                                 break;
+                             }
+                         }
+                     }
                 }
+            } else {
+                 // Fallback: If the expected slot was empty/unknown, scan the hotbar anyway.
+                 for (int i = 0; i < 9; i++) {
+                     if (i == slot) continue;
+                     String otherVirtualId = virtualItemRegistry.getSlotVirtualId(playerUuid, "hotbar:" + i);
+                     if (otherVirtualId != null) {
+                         String otherBaseId = VirtualItemRegistry.getBaseItemId(otherVirtualId);
+                         if (otherBaseId != null && otherBaseId.equals(equipment.rightHandItemId)) {
+                             equipment.rightHandItemId = otherVirtualId;
+                             break;
+                         }
+                     }
+                 }
             }
         }
 
@@ -811,6 +978,8 @@ public class TooltipPacketAdapter {
         }
         return count;
     }
+
+
 
     // ─────────────────────────────────────────────────────────────────────────
     //  Deep clone helpers

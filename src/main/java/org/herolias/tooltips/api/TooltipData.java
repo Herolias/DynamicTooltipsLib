@@ -119,6 +119,7 @@ public final class TooltipData {
      */
     public static final class Builder {
         private final List<String> lines = new ArrayList<>();
+        private final List<String> overrideLines = new ArrayList<>();
         private String nameOverride;
         private String descriptionOverride;
         private String stableHashInput = "";
@@ -142,6 +143,21 @@ public final class TooltipData {
         @Nonnull
         public Builder addLines(@Nonnull List<String> lines) {
             this.lines.addAll(lines);
+            return this;
+        }
+
+        /**
+         * Adds a line to the description override.
+         * <p>
+         * If any override lines are added, they will be joined with newlines to form
+         * the final {@link #descriptionOverride(String)}.
+         * <p>
+         * <b>Note:</b> If {@link #descriptionOverride(String)} is called explicitly,
+         * it takes precedence over lines added via this method.
+         */
+        @Nonnull
+        public Builder addLineOverride(@Nonnull String line) {
+            this.overrideLines.add(line);
             return this;
         }
 
@@ -187,6 +203,10 @@ public final class TooltipData {
 
         @Nonnull
         public TooltipData build() {
+            // If descriptionOverride wasn't set explicitly but we have override lines, build it.
+            if (this.descriptionOverride == null && !this.overrideLines.isEmpty()) {
+                this.descriptionOverride = String.join("\n", this.overrideLines);
+            }
             return new TooltipData(this);
         }
     }

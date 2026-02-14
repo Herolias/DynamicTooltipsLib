@@ -244,6 +244,8 @@ public class TooltipRegistry {
                 if (vo.getSet() != null) visualBuilder.set(vo.getSet());
                 if (vo.getCategories() != null) visualBuilder.categories(vo.getCategories());
                 if (vo.getDisplayEntityStatsHUD() != null) visualBuilder.displayEntityStatsHUD(vo.getDisplayEntityStatsHUD());
+                if (vo.getItemEntity() != null) visualBuilder.itemEntity(vo.getItemEntity());
+                if (vo.getDurability() != null) visualBuilder.durability(vo.getDurability());
             }
 
             allLines.addAll(data.getLines());
