@@ -177,26 +177,33 @@ public class VirtualItemRegistry {
      *
      * @param baseItemId  the real item ID to clone from
      * @param virtualId   the virtual item ID to assign
-     * @param nameOverride if non-null, the virtual item gets its own name key
+     * @param nameOverride if non-null, the virtual item gets its own name key (used for text overrides)
      * @param visualOverrides optional visual property overrides
+     * @param nameTranslationKey if non-null, specific translation key to use for name
+     * @param descriptionTranslationKey if non-null, specific translation key to use for description
      * @return the virtual {@code ItemBase}, or {@code null} if the base item was not found
      */
     @Nullable
     public ItemBase getOrCreateVirtualItemBase(@Nonnull String baseItemId,
                                                @Nonnull String virtualId,
                                                @Nullable String nameOverride,
-                                               @Nullable org.herolias.tooltips.api.ItemVisualOverrides visualOverrides) {
-        // Use a cache key that includes whether there's a name override.
+                                               @Nullable org.herolias.tooltips.api.ItemVisualOverrides visualOverrides,
+                                               @Nullable String nameTranslationKey,
+                                               @Nullable String descriptionTranslationKey) {
+        // Use a cache key that includes whether there's a name override or translation keys to differentiate variants.
         // We also support fallback to the opposite variant key so a later lookup
         // never rebuilds the same virtual ID with downgraded visuals.
-        String cacheKey = nameOverride != null ? virtualId + ":named" : virtualId;
-        String fallbackKey = nameOverride != null ? virtualId : virtualId + ":named";
-
+        String cacheKey = virtualId +
+            (nameOverride != null ? ":named" : "") +
+            (nameTranslationKey != null ? ":nk=" + nameTranslationKey : "") +
+            (descriptionTranslationKey != null ? ":dk=" + descriptionTranslationKey : "");
+        
         ItemBase cached = virtualItemCache.get(cacheKey);
         if (cached != null) return cached;
 
-        ItemBase fallbackCached = virtualItemCache.get(fallbackKey);
-        if (fallbackCached != null) return fallbackCached;
+        // Note: Fallback logic gets complicated with multiple dimensions. Since virtual ID 
+        // includes the hash which includes keys, the virtualID itself is unique enough usually.
+        // We stick to the specific cache key.
 
         return virtualItemCache.computeIfAbsent(cacheKey, k -> {
             try {
@@ -266,19 +273,29 @@ public class VirtualItemRegistry {
                 clone.variant = true;
 
                 // Give the virtual item its own unique description translation key.
-                String virtualDescKey = getVirtualDescriptionKey(virtualId);
                 if (clone.translationProperties != null) {
                     clone.translationProperties = clone.translationProperties.clone();
-                    clone.translationProperties.description = virtualDescKey;
-                    if (nameOverride != null) {
-                        clone.translationProperties.name = getVirtualNameKey(virtualId);
-                    }
                 } else {
                     clone.translationProperties = new ItemTranslationProperties();
-                    clone.translationProperties.name = nameOverride != null
-                            ? getVirtualNameKey(virtualId)
-                            : "server.items." + baseItemId + ".name";
-                    clone.translationProperties.description = virtualDescKey;
+                }
+
+                // Determine Description Key
+                if (descriptionTranslationKey != null) {
+                    clone.translationProperties.description = descriptionTranslationKey;
+                } else {
+                    clone.translationProperties.description = getVirtualDescriptionKey(virtualId);
+                }
+
+                // Determine Name Key
+                if (nameTranslationKey != null) {
+                    clone.translationProperties.name = nameTranslationKey;
+                } else if (nameOverride != null) {
+                    clone.translationProperties.name = getVirtualNameKey(virtualId);
+                } else {
+                     // If no override and no translation key, default to original name key logic
+                    if (clone.translationProperties.name == null) { // if it was null initially
+                         clone.translationProperties.name = "server.items." + baseItemId + ".name";
+                    }
                 }
 
                 return clone;

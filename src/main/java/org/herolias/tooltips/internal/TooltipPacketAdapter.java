@@ -344,7 +344,9 @@ public class TooltipPacketAdapter {
                                 itemId,
                                 virtualId,
                                 composed.getNameOverride(),
-                                composed.getVisualOverrides()
+                                composed.getVisualOverrides(),
+                                composed.getNameTranslationKey(),
+                                composed.getDescriptionTranslationKey()
                         );
 
                         if (virtualItem != null) {
@@ -573,7 +575,7 @@ public class TooltipPacketAdapter {
             // Note: If visualOverrides is null (e.g. server restart cleared cache), we might lose visuals here.
             // This is acceptable for now vs crashing or strict persistence.
             ItemBase virtualBase = virtualItemRegistry.getOrCreateVirtualItemBase(
-                    itemId, virtualId, null, visualOverrides);
+                    itemId, virtualId, null, visualOverrides, null, null);
 
             if (virtualBase != null) {
                 newVirtualItems.put(virtualId, virtualBase);
@@ -674,7 +676,9 @@ public class TooltipPacketAdapter {
                                 baseItemId, composed.getCombinedHash());
                         ItemBase virtualBase = virtualItemRegistry.getOrCreateVirtualItemBase(
                                 baseItemId, virtualId, effectiveName,
-                                composed.getVisualOverrides());
+                                composed.getVisualOverrides(),
+                                composed.getNameTranslationKey(),
+                                composed.getDescriptionTranslationKey());
 
                         if (virtualBase != null) {
                             comp.item.itemId = virtualId;
@@ -895,7 +899,9 @@ public class TooltipPacketAdapter {
         String nameOverride = composed != null ? composed.getNameOverride() : null;
 
         ItemBase virtualBase = virtualItemRegistry.getOrCreateVirtualItemBase(
-                baseId, virtualId, nameOverride, visualOverrides);
+                baseId, virtualId, nameOverride, visualOverrides,
+                composed != null ? composed.getNameTranslationKey() : null,
+                composed != null ? composed.getDescriptionTranslationKey() : null);
 
         if (virtualBase != null) {
             return virtualBase;
@@ -905,7 +911,7 @@ public class TooltipPacketAdapter {
         // try again with the resolved original name for this recipient language.
         String originalName = virtualItemRegistry.getOriginalName(baseId, recipientRef.getLanguage());
         if (originalName != null) {
-            return virtualItemRegistry.getOrCreateVirtualItemBase(baseId, virtualId, originalName, null);
+            return virtualItemRegistry.getOrCreateVirtualItemBase(baseId, virtualId, originalName, null, null, null);
         }
         return null;
     }
@@ -977,7 +983,8 @@ public class TooltipPacketAdapter {
 
             // Get or create the virtual ItemBase definition
             ItemBase virtualBase = virtualItemRegistry.getOrCreateVirtualItemBase(
-                    baseItemId, virtualId, composed.getNameOverride(), composed.getVisualOverrides());
+                    baseItemId, virtualId, composed.getNameOverride(), composed.getVisualOverrides(),
+                    composed.getNameTranslationKey(), composed.getDescriptionTranslationKey());
             if (virtualBase == null) {
                 if (sectionName != null) {
                     virtualItemRegistry.trackSlotVirtualId(playerUuid, sectionName + ":" + slot, null);

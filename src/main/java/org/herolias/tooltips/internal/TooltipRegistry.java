@@ -63,7 +63,7 @@ public class TooltipRegistry {
 
     /** Sentinel for items with no tooltip data (caches negative results). */
     private static final ComposedTooltip EMPTY_SENTINEL = new ComposedTooltip(
-            Collections.emptyList(), null, null, null, "");
+            Collections.emptyList(), null, null, null, null, null, "");
 
     /** Maximum entries in the item-state cache before new entries are rejected. */
     private static final int STATE_CACHE_MAX = 4096;
@@ -170,6 +170,14 @@ public class TooltipRegistry {
             hashBuilder.append(r.provider.getProviderId())
                     .append(':')
                     .append(r.data.getStableHashInput());
+            
+            // Include translation keys in hash input
+            if (r.data.getNameTranslationKey() != null) {
+                hashBuilder.append(":nk=").append(r.data.getNameTranslationKey());
+            }
+            if (r.data.getDescriptionTranslationKey() != null) {
+                hashBuilder.append(":dk=").append(r.data.getDescriptionTranslationKey());
+            }
 
             if (r.data.getVisualOverrides() != null) {
                 r.data.getVisualOverrides().appendHashInput(hashBuilder);
@@ -202,6 +210,8 @@ public class TooltipRegistry {
                                                   @Nonnull String combinedHash) {
         String nameOverride = null;
         String descriptionOverride = null;
+        String nameTranslationKey = null;
+        String descriptionTranslationKey = null;
         org.herolias.tooltips.api.ItemVisualOverrides.Builder visualBuilder = org.herolias.tooltips.api.ItemVisualOverrides.builder();
         boolean hasVisuals = false;
         List<String> allLines = new ArrayList<>();
@@ -214,9 +224,19 @@ public class TooltipRegistry {
             if (data.getNameOverride() != null) {
                 nameOverride = data.getNameOverride();
             }
+            if (data.getNameTranslationKey() != null) {
+                nameTranslationKey = data.getNameTranslationKey();
+                // If a key is set, plain text override is ignored/cleared to avoid ambiguity
+                nameOverride = null;
+            }
 
             if (data.getDescriptionOverride() != null) {
                 descriptionOverride = data.getDescriptionOverride();
+            }
+            if (data.getDescriptionTranslationKey() != null) {
+                descriptionTranslationKey = data.getDescriptionTranslationKey();
+                // If a key is set, plain text override is ignored/cleared
+                descriptionOverride = null;
             }
 
             org.herolias.tooltips.api.ItemVisualOverrides vo = data.getVisualOverrides();
@@ -255,6 +275,8 @@ public class TooltipRegistry {
                 Collections.unmodifiableList(allLines),
                 nameOverride,
                 descriptionOverride,
+                nameTranslationKey,
+                descriptionTranslationKey,
                 hasVisuals ? visualBuilder.build() : null,
                 combinedHash
         );
@@ -271,17 +293,23 @@ public class TooltipRegistry {
         private final List<String> additiveLines;
         private final String nameOverride;
         private final String descriptionOverride;
+        private final String nameTranslationKey;
+        private final String descriptionTranslationKey;
         private final ItemVisualOverrides visualOverrides;
         private final String combinedHash;
 
         ComposedTooltip(List<String> additiveLines,
                         @Nullable String nameOverride,
                         @Nullable String descriptionOverride,
+                        @Nullable String nameTranslationKey,
+                        @Nullable String descriptionTranslationKey,
                         @Nullable ItemVisualOverrides visualOverrides,
                         @Nonnull String combinedHash) {
             this.additiveLines = additiveLines;
             this.nameOverride = nameOverride;
             this.descriptionOverride = descriptionOverride;
+            this.nameTranslationKey = nameTranslationKey;
+            this.descriptionTranslationKey = descriptionTranslationKey;
             this.visualOverrides = visualOverrides;
             this.combinedHash = combinedHash;
         }
@@ -289,6 +317,8 @@ public class TooltipRegistry {
         @Nonnull public List<String> getAdditiveLines() { return additiveLines; }
         @Nullable public String getNameOverride() { return nameOverride; }
         @Nullable public String getDescriptionOverride() { return descriptionOverride; }
+        @Nullable public String getNameTranslationKey() { return nameTranslationKey; }
+        @Nullable public String getDescriptionTranslationKey() { return descriptionTranslationKey; }
         @Nullable public ItemVisualOverrides getVisualOverrides() { return visualOverrides; }
         @Nonnull public String getCombinedHash() { return combinedHash; }
 
@@ -301,11 +331,16 @@ public class TooltipRegistry {
          */
         @Nonnull
         public String buildDescription(@Nullable String originalDescription) {
-            // Full description override takes absolute precedence
+            // Full description override takes absolute precedence (text or key)
+            // Note: If descriptionTranslationKey is set, this method might not be used
+            // directly for the packet description if we map it to the key instead.
+            // But we keep this for fallback/logic consistency.
             if (descriptionOverride != null) {
                 return descriptionOverride;
             }
-
+            // If we have a translation key, we generally don't build a text description
+            // unless we are simulating it. We will leave this consistent with overrides.
+            
             StringBuilder sb = new StringBuilder();
 
             if (originalDescription != null && !originalDescription.isEmpty()) {

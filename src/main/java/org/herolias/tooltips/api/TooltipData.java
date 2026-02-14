@@ -34,6 +34,8 @@ public final class TooltipData {
     private final List<String> lines;
     private final String nameOverride;
     private final String descriptionOverride;
+    private final String nameTranslationKey;
+    private final String descriptionTranslationKey;
     private final String stableHashInput;
     @Nullable private final ItemVisualOverrides visualOverrides;
 
@@ -41,6 +43,8 @@ public final class TooltipData {
         this.lines = Collections.unmodifiableList(new ArrayList<>(builder.lines));
         this.nameOverride = builder.nameOverride;
         this.descriptionOverride = builder.descriptionOverride;
+        this.nameTranslationKey = builder.nameTranslationKey;
+        this.descriptionTranslationKey = builder.descriptionTranslationKey;
         this.stableHashInput = builder.stableHashInput;
         this.visualOverrides = builder.visualOverrides;
     }
@@ -75,6 +79,26 @@ public final class TooltipData {
     }
 
     /**
+     * If non-null, sets the translation key for the item's display name.
+     * <b>Destructive</b> — highest-priority provider wins.
+     * Use this instead of {@link #getNameOverride()} when you want to use a translation key.
+     */
+    @Nullable
+    public String getNameTranslationKey() {
+        return nameTranslationKey;
+    }
+
+    /**
+     * If non-null, sets the translation key for the item's description.
+     * <b>Destructive</b> — highest-priority provider wins (replaces entire description).
+     * Use this instead of {@link #getDescriptionOverride()} when you want to use a translation key.
+     */
+    @Nullable
+    public String getDescriptionTranslationKey() {
+        return descriptionTranslationKey;
+    }
+
+    /**
      * If non-null, provides visual property overrides (model, texture, etc.) for the item.
      * <b>Destructive</b> — highest-priority provider wins (merged field-by-field).
      */
@@ -101,12 +125,12 @@ public final class TooltipData {
 
     /** Whether this data only has additive lines (no destructive overrides). */
     public boolean isAdditive() {
-        return nameOverride == null && descriptionOverride == null && visualOverrides == null;
+        return nameOverride == null && descriptionOverride == null && visualOverrides == null && nameTranslationKey == null && descriptionTranslationKey == null;
     }
 
     /** Whether this data has any content at all. */
     public boolean isEmpty() {
-        return lines.isEmpty() && nameOverride == null && descriptionOverride == null && visualOverrides == null;
+        return lines.isEmpty() && nameOverride == null && descriptionOverride == null && visualOverrides == null && nameTranslationKey == null && descriptionTranslationKey == null;
     }
 
     @Nonnull
@@ -122,6 +146,8 @@ public final class TooltipData {
         private final List<String> overrideLines = new ArrayList<>();
         private String nameOverride;
         private String descriptionOverride;
+        private String nameTranslationKey;
+        private String descriptionTranslationKey;
         private String stableHashInput = "";
         private ItemVisualOverrides visualOverrides;
 
@@ -171,12 +197,31 @@ public final class TooltipData {
         }
 
         /**
+         * Sets a name translation key override. <b>Destructive</b> — highest-priority provider wins.
+         */
+        @Nonnull
+        public Builder nameTranslationKey(@Nonnull String key) {
+            this.nameTranslationKey = key;
+            return this;
+        }
+
+        /**
          * Sets a full description override. <b>Destructive</b> — replaces the
          * entire tooltip including all additive lines from other providers.
          */
         @Nonnull
         public Builder descriptionOverride(@Nonnull String description) {
             this.descriptionOverride = description;
+            return this;
+        }
+
+        /**
+         * Sets a description translation key override. <b>Destructive</b> — replaces the
+         * entire tooltip including all additive lines from other providers.
+         */
+        @Nonnull
+        public Builder descriptionTranslationKey(@Nonnull String key) {
+            this.descriptionTranslationKey = key;
             return this;
         }
 

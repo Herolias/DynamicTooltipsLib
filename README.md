@@ -134,15 +134,17 @@ The `TooltipData.builder()` provides a fluent API for constructing tooltip data.
 #### Override Methods (Destructive)
 These methods replace existing item properties. If multiple providers set these, the one with the highest priority wins.
 
-*   `nameOverride(String name)`: Replaces the item's display name.
-*   `descriptionOverride(String description)`: Replaces the **entire** description (original + additive lines).
+*   `nameOverride(String name)`: Replaces the item's display name with raw text.
+*   `nameTranslationKey(String key)`: Replaces the item's display name with a translation key (e.g., `server.items.sword.name`). **Takes precedence over `nameOverride`.**
+*   `descriptionOverride(String description)`: Replaces the **entire** description (original + additive lines) with raw text.
+*   `descriptionTranslationKey(String key)`: Replaces the **entire** description with a translation key. **Takes precedence over `descriptionOverride`.**
 *   `addLineOverride(String line)`: Adds a line to the description override. Useful if you want to build the override line-by-line. *Note: `descriptionOverride(String)` takes precedence.*
-*   `visualOverrides(ItemVisualOverrides overrides)`: Applies client-side visual changes (model, texture, etc.). Experimental for now, it does not have full multiplayer support yet.
+*   `visualOverrides(ItemVisualOverrides overrides)`: Applies client-side visual changes (model, texture, etc.).
 
 #### State Methods
 *   `hashInput(String input)`: **Required.** A deterministic string representing the item's state (e.g., `enchant:sharpness:5`). Used for caching virtual IDs.
 
-### Visual Overrides Reference (Experimental)
+### Visual Overrides Reference
 
 Use `ItemVisualOverrides.builder()` to construct client-side visual overrides. All fields are optional; only non-null values will override the original item's properties.
 
@@ -164,7 +166,7 @@ return TooltipData.builder()
 ```
 
 #### Supported Fields
-The following fields map directly to `ItemBase` properties.
+The following fields map directly to `ItemBase` properties. Some of them are experimental and may not work in all cases. Icon, model, texture, and qualityIndex are fully tested and supported.
 
 | Field | Type | Description |
 | :--- | :--- | :--- |
