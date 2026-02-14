@@ -186,8 +186,17 @@ public class VirtualItemRegistry {
                                                @Nonnull String virtualId,
                                                @Nullable String nameOverride,
                                                @Nullable org.herolias.tooltips.api.ItemVisualOverrides visualOverrides) {
-        // Use a cache key that includes whether there's a name override
+        // Use a cache key that includes whether there's a name override.
+        // We also support fallback to the opposite variant key so a later lookup
+        // never rebuilds the same virtual ID with downgraded visuals.
         String cacheKey = nameOverride != null ? virtualId + ":named" : virtualId;
+        String fallbackKey = nameOverride != null ? virtualId : virtualId + ":named";
+
+        ItemBase cached = virtualItemCache.get(cacheKey);
+        if (cached != null) return cached;
+
+        ItemBase fallbackCached = virtualItemCache.get(fallbackKey);
+        if (fallbackCached != null) return fallbackCached;
 
         return virtualItemCache.computeIfAbsent(cacheKey, k -> {
             try {

@@ -22,6 +22,8 @@ import com.hypixel.hytale.protocol.packets.interface_.Notification;
 import com.hypixel.hytale.protocol.FormattedMessage;
 import com.hypixel.hytale.server.core.Message;
 import com.hypixel.hytale.server.core.HytaleServer;
+import com.hypixel.hytale.server.core.entity.entities.Player;
+import com.hypixel.hytale.server.core.inventory.ItemStack;
 import com.hypixel.hytale.server.core.io.adapter.PacketAdapters;
 import com.hypixel.hytale.server.core.io.adapter.PacketFilter;
 import com.hypixel.hytale.server.core.io.adapter.PlayerPacketFilter;
@@ -41,6 +43,11 @@ import javax.annotation.Nullable;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+
+// Additional imports for EntityStore access
+import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
+import com.hypixel.hytale.component.Ref;
+import com.hypixel.hytale.component.Store;
 
 /**
  * Bidirectional packet adapter that provides per-item dynamic tooltips
@@ -140,6 +147,7 @@ public class TooltipPacketAdapter {
     //  Registration / deregistration
     // ═══════════════════════════════════════════════════════════════════════
 
+
     public void register() {
         outboundFilter = PacketAdapters.registerOutbound((PlayerPacketFilter) this::onOutboundPacket);
         inboundFilter = PacketAdapters.registerInbound((PlayerPacketFilter) this::onInboundPacket);
@@ -202,9 +210,10 @@ public class TooltipPacketAdapter {
             } else if (packet instanceof SyncInteractionChains syncPacket) {
                 translateInboundSyncInteractionChains(playerRef, syncPacket);
             } else if (packet instanceof SetActiveSlot setSlot) {
-                // Track hotbar slot changes (assuming hotbar is inventory section 0, or implied)
-                // We update this immediately so subsequent EntityUpdates have the correct slot.
-                playerActiveHotbarSlots.put(playerRef.getUuid(), setSlot.activeSlot);
+                // Track hotbar slot changes only (Inventory.HOTBAR_SECTION_ID = -1).
+                if (setSlot.inventorySectionId == -1) {
+                    playerActiveHotbarSlots.put(playerRef.getUuid(), setSlot.activeSlot);
+                }
             }
         } catch (Exception e) {
             LOGGER.atWarning().log("Error in inbound packet adapter for "
@@ -600,17 +609,43 @@ public class TooltipPacketAdapter {
         if (packet.updates == null || packet.updates.length == 0) return;
 
         Integer localEntityId = playerEntityIds.get(playerRef.getUuid());
+        
+        // EntityStore for reverse lookup (Network ID -> Entity Ref)
+        // We act largely on the recipient's world view
+        EntityStore entityStore = null;
+        if (playerRef.isValid() && playerRef.getReference() != null) {
+            Store<EntityStore> store = playerRef.getReference().getStore();
+            if (store != null) {
+                entityStore = store.getExternalData();
+            }
+        }
 
-        Map<String, ItemBase> newVirtualItems = null;
-        Map<String, String> translations = null;
+        Map<String, ItemBase> newVirtualItems = new LinkedHashMap<>();
+        Map<String, String> translations = new LinkedHashMap<>();
 
         for (EntityUpdate update : packet.updates) {
             if (update.updates == null) continue;
 
             for (ComponentUpdate comp : update.updates) {
-                // ── Player Equipment (visual reversion fix) ──
-                if (localEntityId != null && update.networkId == localEntityId && comp.equipment != null) {
-                    processEquipmentUpdate(playerRef, comp.equipment);
+                // ── Player Equipment (visual reversion fix & multiplayer broadcast) ──
+                if (comp.equipment != null) {
+                    if (localEntityId != null && update.networkId == localEntityId) {
+                        // Self-update: The player is updating their own equipment.
+                        // We use the player's own UUID to look up their active slot.
+                        processEquipmentUpdate(playerRef, playerRef, comp.equipment, newVirtualItems, translations);
+                    } else if (localEntityId != null && update.networkId != localEntityId && entityStore != null) {
+                        // Remote-update: Another entity is updating equipment.
+                        // We need to find out WHO this entity is.
+                        Ref<EntityStore> entityRef = entityStore.getRefFromNetworkId(update.networkId);
+                        if (entityRef != null) {
+                            // Check if it's a player
+                            PlayerRef remotePlayerRef = entityRef.getStore().getComponent(entityRef, PlayerRef.getComponentType());
+                            if (remotePlayerRef != null) {
+                                // It IS a player! We can now resolve their active slot and overrides.
+                                processEquipmentUpdate(playerRef, remotePlayerRef, comp.equipment, newVirtualItems, translations);
+                            }
+                        }
+                    }
                 }
 
                 // ── Dropped Item entities (model/texture override) ──
@@ -643,12 +678,6 @@ public class TooltipPacketAdapter {
 
                         if (virtualBase != null) {
                             comp.item.itemId = virtualId;
-
-                            // Lazily initialise auxiliary maps
-                            if (newVirtualItems == null) {
-                                newVirtualItems = new LinkedHashMap<>();
-                                translations = new LinkedHashMap<>();
-                            }
                             newVirtualItems.put(virtualId, virtualBase);
 
                             String descKey = VirtualItemRegistry.getVirtualDescriptionKey(virtualId);
@@ -669,41 +698,49 @@ public class TooltipPacketAdapter {
         }
 
         // Send auxiliary packets (UpdateItems + translations) if any items were virtualised
-        if (newVirtualItems != null && !newVirtualItems.isEmpty()) {
+        if (!newVirtualItems.isEmpty()) {
             sendAuxiliaryPackets(playerRef, newVirtualItems, translations);
         }
     }
 
-    private void processEquipmentUpdate(@Nonnull PlayerRef playerRef, @Nonnull Equipment equipment) {
+    private void processEquipmentUpdate(@Nonnull PlayerRef recipientRef,
+                                        @Nonnull PlayerRef observedPlayerRef,
+                                        @Nonnull Equipment equipment,
+                                        @Nonnull Map<String, ItemBase> newVirtualItems,
+                                        @Nonnull Map<String, String> translations) {
+        UUID observedPlayerUuid = observedPlayerRef.getUuid();
+        boolean rightHandVirtualized = false;
+        boolean leftHandVirtualized = false;
+        
         // If the equipment update sets a right-hand item that is NOT virtual,
-        // we check if it matches the base ID of the virtual item in the active slot.
-        // If so, we overwrite it with the virtual ID.
+        // we check if it matches the base ID of the virtual item in the ACTIVE slot
+        // of the OBSERVED player.
         if (equipment.rightHandItemId != null && !VirtualItemRegistry.isVirtualId(equipment.rightHandItemId)) {
-            UUID playerUuid = playerRef.getUuid();
-            Integer slotObj = playerActiveHotbarSlots.get(playerUuid);
+            
+            Integer slotObj = playerActiveHotbarSlots.get(observedPlayerUuid);
             // Default to slot 0 if unknown (reasonable fallback for initial join)
             int slot = slotObj != null ? slotObj : 0;
 
-            String virtualId = virtualItemRegistry.getSlotVirtualId(playerUuid, "hotbar:" + slot);
+            String virtualId = virtualItemRegistry.getSlotVirtualId(observedPlayerUuid, "hotbar:" + slot);
             if (virtualId != null) {
                 String baseId = VirtualItemRegistry.getBaseItemId(virtualId);
                 // If the packet assumes the base item, but we know it's virtual, swap it.
                 if (baseId != null && baseId.equals(equipment.rightHandItemId)) {
                     equipment.rightHandItemId = virtualId;
+                    addVirtualEquipmentItem(recipientRef, baseId, virtualId, newVirtualItems, translations);
+                    rightHandVirtualized = true;
+
                 } else {
                      // Fallback: If the active slot didn't match, scan the entire hotbar.
-                     // usage case: The client switched slots (packet in flight), server
-                     // sent EntityUpdate reacting to it, but our inbound listener hasn't
-                     // updated playerActiveHotbarSlots yet.
                      for (int i = 0; i < 9; i++) {
                          if (i == slot) continue; // Already checked
-                         String otherVirtualId = virtualItemRegistry.getSlotVirtualId(playerUuid, "hotbar:" + i);
+                         String otherVirtualId = virtualItemRegistry.getSlotVirtualId(observedPlayerUuid, "hotbar:" + i);
                          if (otherVirtualId != null) {
                              String otherBaseId = VirtualItemRegistry.getBaseItemId(otherVirtualId);
                              if (otherBaseId != null && otherBaseId.equals(equipment.rightHandItemId)) {
                                  equipment.rightHandItemId = otherVirtualId;
-                                 // Opportunistically update the active slot?
-                                 // Maybe, but let's be safe and just fix the visual.
+                                 addVirtualEquipmentItem(recipientRef, otherBaseId, otherVirtualId, newVirtualItems, translations);
+                                 rightHandVirtualized = true;
                                  break;
                              }
                          }
@@ -713,11 +750,13 @@ public class TooltipPacketAdapter {
                  // Fallback: If the expected slot was empty/unknown, scan the hotbar anyway.
                  for (int i = 0; i < 9; i++) {
                      if (i == slot) continue;
-                     String otherVirtualId = virtualItemRegistry.getSlotVirtualId(playerUuid, "hotbar:" + i);
+                     String otherVirtualId = virtualItemRegistry.getSlotVirtualId(observedPlayerUuid, "hotbar:" + i);
                      if (otherVirtualId != null) {
                          String otherBaseId = VirtualItemRegistry.getBaseItemId(otherVirtualId);
                          if (otherBaseId != null && otherBaseId.equals(equipment.rightHandItemId)) {
                              equipment.rightHandItemId = otherVirtualId;
+                             addVirtualEquipmentItem(recipientRef, otherBaseId, otherVirtualId, newVirtualItems, translations);
+                             rightHandVirtualized = true;
                              break;
                          }
                      }
@@ -725,20 +764,169 @@ public class TooltipPacketAdapter {
             }
         }
 
+        if (!rightHandVirtualized) {
+            rightHandVirtualized = tryVirtualizeFromObservedInventory(
+                    recipientRef, observedPlayerRef, false, equipment, newVirtualItems, translations);
+        }
+
         // Fix for off-hand (left hand) items not showing visual overrides.
         // The off-hand slot maps to "utility:0" in our registry.
         if (equipment.leftHandItemId != null && !VirtualItemRegistry.isVirtualId(equipment.leftHandItemId)) {
-            UUID playerUuid = playerRef.getUuid();
-            // The off-hand is always utility slot 0
-            String virtualId = virtualItemRegistry.getSlotVirtualId(playerUuid, "utility:0");
+            // The off-hand is always utility slot 0 of the observed player
+            String virtualId = virtualItemRegistry.getSlotVirtualId(observedPlayerUuid, "utility:0");
 
             if (virtualId != null) {
                 String baseId = VirtualItemRegistry.getBaseItemId(virtualId);
                 if (baseId != null && baseId.equals(equipment.leftHandItemId)) {
                     equipment.leftHandItemId = virtualId;
+                    addVirtualEquipmentItem(recipientRef, baseId, virtualId, newVirtualItems, translations);
+                    leftHandVirtualized = true;
                 }
             }
         }
+
+        if (!leftHandVirtualized) {
+            tryVirtualizeFromObservedInventory(
+                    recipientRef, observedPlayerRef, true, equipment, newVirtualItems, translations);
+        }
+    }
+
+    private boolean tryVirtualizeFromObservedInventory(@Nonnull PlayerRef recipientRef,
+                                                       @Nonnull PlayerRef observedPlayerRef,
+                                                       boolean leftHand,
+                                                       @Nonnull Equipment equipment,
+                                                       @Nonnull Map<String, ItemBase> newVirtualItems,
+                                                       @Nonnull Map<String, String> translations) {
+        Player observedPlayer = getObservedPlayerComponent(observedPlayerRef);
+        if (observedPlayer == null) return false;
+
+        ItemStack stack = leftHand
+                ? observedPlayer.getInventory().getUtilityItem()
+                : observedPlayer.getInventory().getItemInHand();
+        if (stack == null) return false;
+
+        String stackItemId = stack.getItemId();
+        if (stackItemId == null || stackItemId.isEmpty() || VirtualItemRegistry.isVirtualId(stackItemId)) {
+            return false;
+        }
+
+        String equipmentItemId = leftHand ? equipment.leftHandItemId : equipment.rightHandItemId;
+        if (equipmentItemId == null || equipmentItemId.isEmpty() || VirtualItemRegistry.isVirtualId(equipmentItemId)) {
+            return false;
+        }
+
+        // Guard against desynced snapshots: only rewrite when equipment and inventory agree.
+        if (!stackItemId.equals(equipmentItemId)) {
+            return false;
+        }
+
+        TooltipRegistry.ComposedTooltip composed = tooltipRegistry.compose(stackItemId, stack.toPacket().metadata);
+        if (composed == null) return false;
+
+        String virtualId = VirtualItemRegistry.generateVirtualId(stackItemId, composed.getCombinedHash());
+        if (leftHand) {
+            equipment.leftHandItemId = virtualId;
+            virtualItemRegistry.trackSlotVirtualId(observedPlayerRef.getUuid(), "utility:0", virtualId);
+        } else {
+            equipment.rightHandItemId = virtualId;
+            Integer slot = playerActiveHotbarSlots.get(observedPlayerRef.getUuid());
+            if (slot != null && slot >= 0) {
+                virtualItemRegistry.trackSlotVirtualId(observedPlayerRef.getUuid(), "hotbar:" + slot, virtualId);
+            }
+        }
+
+        addVirtualEquipmentItem(recipientRef, stackItemId, virtualId, newVirtualItems, translations);
+
+        String descKey = VirtualItemRegistry.getVirtualDescriptionKey(virtualId);
+        if (!translations.containsKey(descKey)) {
+            String originalDesc = virtualItemRegistry.getOriginalDescription(stackItemId, recipientRef.getLanguage());
+            String enrichedDesc = composed.buildDescription(originalDesc);
+            translations.put(descKey, enrichedDesc);
+            virtualItemRegistry.cacheDescription(virtualId, enrichedDesc);
+        }
+        if (composed.getNameOverride() != null) {
+            translations.put(VirtualItemRegistry.getVirtualNameKey(virtualId), composed.getNameOverride());
+        }
+        return true;
+    }
+
+    @Nullable
+    private Player getObservedPlayerComponent(@Nonnull PlayerRef observedPlayerRef) {
+        Ref<EntityStore> ref = observedPlayerRef.getReference();
+        if (ref == null || !ref.isValid()) return null;
+        Store<EntityStore> store = ref.getStore();
+        if (store == null) return null;
+        return store.getComponent(ref, Player.getComponentType());
+    }
+
+    private void addVirtualEquipmentItem(@Nonnull PlayerRef recipientRef,
+                                         @Nonnull String baseId,
+                                         @Nonnull String virtualId,
+                                         @Nonnull Map<String, ItemBase> newVirtualItems,
+                                         @Nonnull Map<String, String> translations) {
+        ItemBase virtualBase = resolveVirtualBaseForEquipment(recipientRef, baseId, virtualId);
+        if (virtualBase == null) return;
+
+        newVirtualItems.put(virtualId, virtualBase);
+
+        String descKey = VirtualItemRegistry.getVirtualDescriptionKey(virtualId);
+        String cachedDesc = virtualItemRegistry.getCachedDescription(virtualId);
+        if (cachedDesc != null) {
+            translations.put(descKey, cachedDesc);
+        }
+
+        // If this virtual item uses a virtual name key, ensure the recipient has the translation.
+        String nameKey = VirtualItemRegistry.getVirtualNameKey(virtualId);
+        if (virtualBase.translationProperties != null && nameKey.equals(virtualBase.translationProperties.name)) {
+            String effectiveName = resolveVirtualName(recipientRef, baseId, virtualId);
+            if (effectiveName != null) {
+                translations.put(nameKey, effectiveName);
+            }
+        }
+    }
+
+    @Nullable
+    private ItemBase resolveVirtualBaseForEquipment(@Nonnull PlayerRef recipientRef,
+                                                    @Nonnull String baseId,
+                                                    @Nonnull String virtualId) {
+        TooltipRegistry.ComposedTooltip composed = findComposedByVirtualId(virtualId);
+        org.herolias.tooltips.api.ItemVisualOverrides visualOverrides =
+                composed != null ? composed.getVisualOverrides() : null;
+        String nameOverride = composed != null ? composed.getNameOverride() : null;
+
+        ItemBase virtualBase = virtualItemRegistry.getOrCreateVirtualItemBase(
+                baseId, virtualId, nameOverride, visualOverrides);
+
+        if (virtualBase != null) {
+            return virtualBase;
+        }
+
+        // Fallback: when we only have a "named" variant cached (e.g. dropped items),
+        // try again with the resolved original name for this recipient language.
+        String originalName = virtualItemRegistry.getOriginalName(baseId, recipientRef.getLanguage());
+        if (originalName != null) {
+            return virtualItemRegistry.getOrCreateVirtualItemBase(baseId, virtualId, originalName, null);
+        }
+        return null;
+    }
+
+    @Nullable
+    private String resolveVirtualName(@Nonnull PlayerRef recipientRef,
+                                      @Nonnull String baseId,
+                                      @Nonnull String virtualId) {
+        TooltipRegistry.ComposedTooltip composed = findComposedByVirtualId(virtualId);
+        if (composed != null && composed.getNameOverride() != null) {
+            return composed.getNameOverride();
+        }
+        return virtualItemRegistry.getOriginalName(baseId, recipientRef.getLanguage());
+    }
+
+    @Nullable
+    private TooltipRegistry.ComposedTooltip findComposedByVirtualId(@Nonnull String virtualId) {
+        int separatorIndex = virtualId.indexOf(VirtualItemRegistry.VIRTUAL_SEPARATOR);
+        if (separatorIndex <= 0) return null;
+        String hash = virtualId.substring(separatorIndex + VirtualItemRegistry.VIRTUAL_SEPARATOR.length());
+        return tooltipRegistry.getComposed(hash);
     }
 
     // ───────────────────────────────────────────────────────────────────────
