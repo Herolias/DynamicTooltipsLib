@@ -10,12 +10,15 @@
         }
     ],
     "Website": "https://discord.gg/7XQAnUfQfM",
-    "ServerVersion": "*",
+    "ServerVersion": "2026.02.11-255364b8e",
     "Dependencies": {
         
     },
     "OptionalDependencies": {
         
+    },
+    "UpdateChecker": {
+        "CurseForge": "1459711"
     },
     "DisabledByDefault": false,
     "Main": "org.herolias.tooltips.DynamicTooltipsLib",

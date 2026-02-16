@@ -30,12 +30,15 @@ import com.hypixel.hytale.server.core.io.adapter.PlayerPacketFilter;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import org.bson.BsonDocument;
 import org.bson.BsonValue;
+import org.bson.json.JsonMode;
+import org.bson.json.JsonWriterSettings;
 
 import com.hypixel.hytale.protocol.packets.entities.EntityUpdates;
 import com.hypixel.hytale.protocol.EntityUpdate;
 import com.hypixel.hytale.protocol.ComponentUpdate;
 import com.hypixel.hytale.protocol.ComponentUpdateType;
-import com.hypixel.hytale.protocol.Equipment;
+import com.hypixel.hytale.protocol.ItemUpdate;
+import com.hypixel.hytale.protocol.EquipmentUpdate;
 import com.hypixel.hytale.protocol.packets.player.SetClientId;
 
 import javax.annotation.Nonnull;
@@ -78,6 +81,12 @@ import com.hypixel.hytale.component.Store;
 public class TooltipPacketAdapter {
 
     private static final HytaleLogger LOGGER = HytaleLogger.forEnclosingClass();
+    
+    // Configure JSON output to use standard JSON types (e.g. numbers) instead of
+    // Extended JSON (e.g. {"$numberInt": "1"}), which the client's Gson parser rejects.
+    private static final JsonWriterSettings JSON_SETTINGS = JsonWriterSettings.builder()
+            .outputMode(JsonMode.SHELL)
+            .build();
 
     private final VirtualItemRegistry virtualItemRegistry;
     private final TooltipRegistry tooltipRegistry;
@@ -176,6 +185,10 @@ public class TooltipPacketAdapter {
         knownPlayerRefs.remove(playerUuid);
         playerEntityIds.remove(playerUuid);
         playerActiveHotbarSlots.remove(playerUuid);
+        
+        // Critical Fix: Clear virtual item registry cache for this player so that
+        // on rejoin, all item definitions are resent fresh.
+        virtualItemRegistry.onPlayerLeave(playerUuid);
     }
 
     /**
@@ -505,7 +518,7 @@ public class TooltipPacketAdapter {
                 }
             }
 
-            return modified ? doc.toJson() : null;
+            return modified ? doc.toJson(JSON_SETTINGS) : null;
 
         } catch (Exception e) {
             LOGGER.atFine().log("Could not process CustomUICommand data: " + e.getMessage());
@@ -630,11 +643,12 @@ public class TooltipPacketAdapter {
 
             for (ComponentUpdate comp : update.updates) {
                 // ── Player Equipment (visual reversion fix & multiplayer broadcast) ──
-                if (comp.equipment != null) {
+                if (comp instanceof EquipmentUpdate) {
+                    EquipmentUpdate equipUpdate = (EquipmentUpdate) comp;
                     if (localEntityId != null && update.networkId == localEntityId) {
                         // Self-update: The player is updating their own equipment.
                         // We use the player's own UUID to look up their active slot.
-                        processEquipmentUpdate(playerRef, playerRef, comp.equipment, newVirtualItems, translations);
+                        processEquipmentUpdate(playerRef, playerRef, equipUpdate, newVirtualItems, translations);
                     } else if (localEntityId != null && update.networkId != localEntityId && entityStore != null) {
                         // Remote-update: Another entity is updating equipment.
                         // We need to find out WHO this entity is.
@@ -644,23 +658,25 @@ public class TooltipPacketAdapter {
                             PlayerRef remotePlayerRef = entityRef.getStore().getComponent(entityRef, PlayerRef.getComponentType());
                             if (remotePlayerRef != null) {
                                 // It IS a player! We can now resolve their active slot and overrides.
-                                processEquipmentUpdate(playerRef, remotePlayerRef, comp.equipment, newVirtualItems, translations);
+                                processEquipmentUpdate(playerRef, remotePlayerRef, equipUpdate, newVirtualItems, translations);
                             }
                         }
                     }
                 }
 
                 // ── Dropped Item entities (model/texture override) ──
-                if (comp.type == ComponentUpdateType.Item && comp.item != null
-                        && comp.item.itemId != null && !comp.item.itemId.isEmpty()
-                        && !VirtualItemRegistry.isVirtualId(comp.item.itemId)) {
+                if (comp instanceof ItemUpdate) {
+                    ItemUpdate itemUpdate = (ItemUpdate) comp;
+                    if (itemUpdate.item != null
+                        && itemUpdate.item.itemId != null && !itemUpdate.item.itemId.isEmpty()
+                        && !VirtualItemRegistry.isVirtualId(itemUpdate.item.itemId)) {
 
                     TooltipRegistry.ComposedTooltip composed = tooltipRegistry.compose(
-                            comp.item.itemId, comp.item.metadata);
+                            itemUpdate.item.itemId, itemUpdate.item.metadata);
                     if (composed != null && composed.getVisualOverrides() != null
                             && !composed.getVisualOverrides().isEmpty()) {
 
-                        String baseItemId = comp.item.itemId;
+                        String baseItemId = itemUpdate.item.itemId;
 
                         // For dropped items, always resolve an effective name so the
                         // virtual ItemBase uses a virtual name key in its
@@ -681,7 +697,7 @@ public class TooltipPacketAdapter {
                                 composed.getDescriptionTranslationKey());
 
                         if (virtualBase != null) {
-                            comp.item.itemId = virtualId;
+                            itemUpdate.item.itemId = virtualId;
                             newVirtualItems.put(virtualId, virtualBase);
 
                             String descKey = VirtualItemRegistry.getVirtualDescriptionKey(virtualId);
@@ -700,6 +716,7 @@ public class TooltipPacketAdapter {
                 }
             }
         }
+    }
 
         // Send auxiliary packets (UpdateItems + translations) if any items were virtualised
         if (!newVirtualItems.isEmpty()) {
@@ -709,7 +726,7 @@ public class TooltipPacketAdapter {
 
     private void processEquipmentUpdate(@Nonnull PlayerRef recipientRef,
                                         @Nonnull PlayerRef observedPlayerRef,
-                                        @Nonnull Equipment equipment,
+                                        @Nonnull EquipmentUpdate equipment,
                                         @Nonnull Map<String, ItemBase> newVirtualItems,
                                         @Nonnull Map<String, String> translations) {
         UUID observedPlayerUuid = observedPlayerRef.getUuid();
@@ -798,7 +815,7 @@ public class TooltipPacketAdapter {
     private boolean tryVirtualizeFromObservedInventory(@Nonnull PlayerRef recipientRef,
                                                        @Nonnull PlayerRef observedPlayerRef,
                                                        boolean leftHand,
-                                                       @Nonnull Equipment equipment,
+                                                       @Nonnull EquipmentUpdate equipment,
                                                        @Nonnull Map<String, ItemBase> newVirtualItems,
                                                        @Nonnull Map<String, String> translations) {
         Player observedPlayer = getObservedPlayerComponent(observedPlayerRef);

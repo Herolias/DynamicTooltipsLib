@@ -129,3 +129,28 @@ tasks.register('generateVSCodeLaunch') {
         launchFile.text = groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(launchConfig))
     }
 }
+
+task inspectEquipmentUpdate {
+    doLast {
+        def url = configurations.compileClasspath.find { it.name.contains('HytaleServer') }?.toURI()?.toURL()
+        if (url == null) { logger.lifecycle 'HytaleServer.jar not found'; return }
+        def loader = new java.net.URLClassLoader([url] as java.net.URL[], ClassLoader.systemClassLoader)
+        
+        def className = 'com.hypixel.hytale.protocol.EquipmentUpdate'
+        logger.lifecycle '--- Inspecting ' + className + ' ---'
+        try {
+            def clazz = loader.loadClass(className)
+            logger.lifecycle 'Fields:'
+            clazz.getDeclaredFields().each { field ->
+                logger.lifecycle '  ' + field.toString()
+                if (field.type.name.contains('Equipment')) {
+                     logger.lifecycle '  -> Found Equipment Type: ' + field.type.name
+                }
+            }
+        } catch (Throwable t) {
+            logger.lifecycle 'Failed to inspect ' + className
+            t.printStackTrace()
+        }
+    }
+}
+

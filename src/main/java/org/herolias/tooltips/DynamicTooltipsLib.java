@@ -35,22 +35,7 @@ public class DynamicTooltipsLib extends JavaPlugin {
     private VirtualItemRegistry virtualItemRegistry;
     private TooltipPacketAdapter packetAdapter;
 
-    /** Tracks known-online players so we can detect disconnects. */
-    private final Set<UUID> knownPlayers = ConcurrentHashMap.newKeySet();
 
-    /**
-     * Tracks how many consecutive detector ticks each player has been "missing"
-     * (not found in any world). This prevents false disconnect detection during
-     * portal transitions, where a player is briefly between worlds.
-     */
-    private final ConcurrentHashMap<UUID, Integer> missedTicks = new ConcurrentHashMap<>();
-
-    /**
-     * Number of consecutive detector ticks (at 1 s interval) a player must be
-     * absent from all worlds before we treat them as disconnected. This grace
-     * period covers portal transitions, which can take several seconds.
-     */
-    private static final int DISCONNECT_GRACE_TICKS = 10;
 
     public DynamicTooltipsLib(@Nonnull JavaPluginInit init) {
         super(init);
@@ -71,79 +56,26 @@ public class DynamicTooltipsLib extends JavaPlugin {
         this.packetAdapter.register();
         LOGGER.atInfo().log("Registered TooltipPacketAdapter (outbound + inbound filters)");
 
-
-
         // Register the public API
         DynamicTooltipsApi api = new DynamicTooltipsApiImpl(
                 tooltipRegistry, virtualItemRegistry, packetAdapter);
         DynamicTooltipsApiProvider.register(api);
 
+        // Register PlayerDisconnectEvent to clean up registry cache
+        this.getEventRegistry().registerGlobal(com.hypixel.hytale.server.core.event.events.player.PlayerDisconnectEvent.class, this::onPlayerDisconnect);
+        LOGGER.atInfo().log("Registered PlayerDisconnectEvent listener for cleanup");
+
         LOGGER.atInfo().log("DynamicTooltipsLib setup complete — API registered");
     }
 
-    @Override
-    protected void start() {
-        // Schedule a lightweight disconnect-detector (same pattern as Simple Enchantments)
-        try {
-            HytaleServer.SCHEDULED_EXECUTOR.scheduleAtFixedRate(
-                    this::checkForDisconnectedPlayers,
-                    0, 1000, // 1 second — player leave cleanup is not latency-critical
-                    TimeUnit.MILLISECONDS
-            );
-            LOGGER.atInfo().log("Scheduled player disconnect detector");
-        } catch (Exception e) {
-            LOGGER.atSevere().log("Failed to schedule disconnect detector: " + e.getMessage());
-        }
-        LOGGER.atInfo().log("DynamicTooltipsLib started");
-    }
-
-    /**
-     * Polls the online player list and cleans up state for disconnected players.
-     * This mirrors the Hytale modding pattern used by Simple Enchantments, since
-     * there is no dedicated player-disconnect event in the Hytale API.
-     * <p>
-     * A grace period ({@link #DISCONNECT_GRACE_TICKS}) prevents false positives
-     * during portal transitions, where a player is temporarily not present in
-     * any world while the client loads the new instance.
-     */
-    private void checkForDisconnectedPlayers() {
-        try {
-            if (Universe.get() == null) return;
-
-            Set<UUID> onlinePlayers = new HashSet<>();
-
-            for (World world : Universe.get().getWorlds().values()) {
-                if (world == null) continue;
-                for (PlayerRef ref : world.getPlayerRefs()) {
-                    if (ref != null && ref.isValid()) {
-                        UUID uuid = ref.getUuid();
-                        onlinePlayers.add(uuid);
-                        knownPlayers.add(uuid);
-                    }
-                }
-            }
-
-            // Find disconnected players — with grace period for world transitions
-            Iterator<UUID> it = knownPlayers.iterator();
-            while (it.hasNext()) {
-                UUID uuid = it.next();
-                if (!onlinePlayers.contains(uuid)) {
-                    int missed = missedTicks.merge(uuid, 1, Integer::sum);
-                    if (missed >= DISCONNECT_GRACE_TICKS) {
-                        it.remove();
-                        missedTicks.remove(uuid);
-                        packetAdapter.onPlayerLeave(uuid);
-                        virtualItemRegistry.onPlayerLeave(uuid);
-                    }
-                } else {
-                    // Player is back (or still online) — reset grace counter
-                    missedTicks.remove(uuid);
-                }
-            }
-        } catch (Exception e) {
-            LOGGER.atWarning().log("Error in disconnect detector: " + e.getMessage());
+    private void onPlayerDisconnect(com.hypixel.hytale.server.core.event.events.player.PlayerDisconnectEvent event) {
+        // Clean up all data associated with this player
+        if (packetAdapter != null) {
+            packetAdapter.onPlayerLeave(event.getPlayerRef().getUuid());
         }
     }
+
+
 
     // ─────────────────────────────────────────────────────────────────────
     //  API implementation (package-private inner class)
