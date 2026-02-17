@@ -370,6 +370,39 @@ public class VirtualItemRegistry {
         return unsent;
     }
 
+    /**
+     * Returns the set of virtual item IDs that have been sent to the given
+     * player, or {@code null} if the player has no tracking data.
+     */
+    @Nullable
+    public Set<String> getSentVirtualIds(@Nonnull UUID playerUuid) {
+        return sentToPlayer.get(playerUuid);
+    }
+
+    /**
+     * Looks up a cached virtual {@link ItemBase} by virtual ID.
+     * Searches the cache using the exact virtual ID as prefix, since cache
+     * keys may include additional suffixes (e.g. {@code ":named"}).
+     *
+     * @return the cached ItemBase, or {@code null} if not found
+     */
+    @Nullable
+    public ItemBase getCachedVirtualItem(@Nonnull String virtualId) {
+        // Direct lookup first (most common case: no name override)
+        ItemBase direct = virtualItemCache.get(virtualId);
+        if (direct != null) return direct;
+        // Fallback: search for keys that start with the virtual ID
+        // (handles ":named", ":nk=", ":dk=" suffixes)
+        synchronized (virtualItemCache) {
+            for (Map.Entry<String, ItemBase> entry : virtualItemCache.entrySet()) {
+                if (entry.getKey().startsWith(virtualId)) {
+                    return entry.getValue();
+                }
+            }
+        }
+        return null;
+    }
+
     // ─────────────────────────────────────────────────────────────────────
     //  Per-player slot-to-virtualId tracking
     // ─────────────────────────────────────────────────────────────────────
@@ -528,6 +561,20 @@ public class VirtualItemRegistry {
         sentToPlayer.remove(playerUuid);
         playerSlotVirtualIds.remove(playerUuid);
         // Clear built descriptions so they are recomposed with fresh text
+        builtDescriptionCache.clear();
+    }
+
+    /**
+     * Clears only language-dependent caches. Called when a player changes
+     * their game language so that descriptions and names are re-resolved
+     * in the new language on the next inventory packet.
+     * <p>
+     * Does <b>not</b> clear the structural {@code virtualItemCache} (item
+     * definitions are language-independent) or per-player slot tracking.
+     */
+    public void clearLanguageCaches() {
+        originalDescriptionCache.clear();
+        originalNameCache.clear();
         builtDescriptionCache.clear();
     }
 

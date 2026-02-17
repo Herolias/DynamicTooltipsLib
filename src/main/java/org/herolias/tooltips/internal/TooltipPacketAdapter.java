@@ -200,7 +200,7 @@ public class TooltipPacketAdapter {
         try {
             HytaleServer.SCHEDULED_EXECUTOR.schedule(() -> {
                 try {
-                    refreshPlayer(playerUuid);
+                    boolean sent = refreshPlayer(playerUuid);
                 } catch (Exception e) {
                     LOGGER.atWarning().log("Post-transition tooltip refresh failed for "
                             + playerUuid + ": " + e.getMessage());
@@ -324,6 +324,28 @@ public class TooltipPacketAdapter {
                 processWindowInventory(playerRef, updateWindow.inventory);
             } else if (packet instanceof CustomPage customPage) {
                 processCustomPage(playerRef, customPage);
+            } else if (packet instanceof UpdateTranslations translationsPacket) {
+                // ─────────────────────────────────────────────────────────────────────
+                //  Language Change Detection
+                // ─────────────────────────────────────────────────────────────────────
+                //  When the client changes the game language, the server sends
+                //  UpdateTranslations(Init, fullLanguageMap) which REPLACES all
+                //  client-side translations. This wipes our custom
+                //  "server.items.dynamic.*" description keys (name keys survive
+                //  because they reference standard server.items.*.name keys).
+                //
+                //  Fix: inject our custom translations directly into the Init
+                //  packet (using a mutable copy, since the server's map is
+                //  unmodifiable) so they're included in the full replacement.
+                //  Then schedule a deferred refresh to rebuild descriptions
+                //  with new-language text.
+                if (translationsPacket.type == UpdateType.Init) {
+                    
+                    if (translationsPacket.translations != null) {
+                        translationsPacket.translations = new HashMap<>(translationsPacket.translations);
+                    }
+                    translationsPacket.type = UpdateType.AddOrUpdate;
+                }
             } else if (packet instanceof Notification) {
                 // ─────────────────────────────────────────────────────────────────────
                 //  Pickup Notifications (Dropped Item Name Fix)
@@ -732,13 +754,21 @@ public class TooltipPacketAdapter {
         UUID observedPlayerUuid = observedPlayerRef.getUuid();
         boolean rightHandVirtualized = false;
         boolean leftHandVirtualized = false;
-        
+
         // If the equipment update sets a right-hand item that is NOT virtual,
         // we check if it matches the base ID of the virtual item in the ACTIVE slot
         // of the OBSERVED player.
         if (equipment.rightHandItemId != null && !VirtualItemRegistry.isVirtualId(equipment.rightHandItemId)) {
-            
-            Integer slotObj = playerActiveHotbarSlots.get(observedPlayerUuid);
+
+            // Fix: Use authoritative active slot from server entity if available
+            Integer slotObj = null;
+            Player player = getObservedPlayerComponent(observedPlayerRef);
+            if (player != null) {
+                slotObj = (int) player.getInventory().getActiveHotbarSlot();
+            } else {
+                slotObj = playerActiveHotbarSlots.get(observedPlayerUuid);
+            }
+
             // Default to slot 0 if unknown (reasonable fallback for initial join)
             int slot = slotObj != null ? slotObj : 0;
 
@@ -1050,6 +1080,14 @@ public class TooltipPacketAdapter {
 
         UUID playerUuid = playerRef.getUuid();
 
+        // DEBUG: Log what translations we're about to send
+        {
+            int descCount = 0;
+            for (String key : translations.keySet()) {
+                if (key.endsWith(".description")) descCount++;
+            }
+        }
+
         // Send virtual item definitions the player hasn't seen yet
         Set<String> unsentItems = virtualItemRegistry.markAndGetUnsent(
                 playerUuid, newVirtualItems.keySet());
@@ -1068,6 +1106,18 @@ public class TooltipPacketAdapter {
         if (!translations.isEmpty()) {
             Map<String, String> lastSent = lastSentTranslations.get(playerUuid);
             Map<String, String> delta = computeTranslationDelta(lastSent, translations);
+
+            // DEBUG: Log delta details
+            {
+                int deltaDescCount = 0;
+                for (Map.Entry<String, String> entry : delta.entrySet()) {
+                    if (entry.getKey().endsWith(".description")) {
+                        deltaDescCount++;
+                        String val = entry.getValue();
+                    }
+                }
+            }
+
             if (!delta.isEmpty()) {
                 sendTranslations(playerRef, delta);
                 if (lastSent == null) {

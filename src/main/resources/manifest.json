@@ -1,7 +1,7 @@
 {
     "Group": "org.herolias",
     "Name": "DynamicTooltipsLib",
-    "Version": "1.2.0",
+    "Version": "1.3.0",
     "Description": "Library mod that enables dynamic, per-item tooltips with multi-mod support",
     "Authors": [
         {
@@ -10,7 +10,7 @@
         }
     ],
     "Website": "https://discord.gg/7XQAnUfQfM",
-    "ServerVersion": "2026.02.11-255364b8e",
+    "ServerVersion": "2026.02.17-255364b8e",
     "Dependencies": {
         
     },
