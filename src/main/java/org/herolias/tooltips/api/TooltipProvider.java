@@ -58,4 +58,23 @@ public interface TooltipProvider {
      */
     @Nullable
     TooltipData getTooltipData(@Nonnull String itemId, @Nullable String metadata);
+
+    /**
+     * Locale-aware variant of {@link #getTooltipData(String, String)}.
+     * <p>
+     * Override this method to produce locale-specific tooltip content (e.g.
+     * translated additive lines). The default implementation delegates to
+     * the locale-less overload, so existing providers are unaffected.
+     *
+     * @param itemId   the real (base) item ID
+     * @param metadata the item's metadata JSON string, or {@code null}
+     * @param locale   the player's language code (e.g. {@code "en-US"}, {@code "de-DE"}),
+     *                 or {@code null} if unknown
+     * @return a {@link TooltipData}, or {@code null} to indicate no tooltip modification
+     */
+    @Nullable
+    default TooltipData getTooltipData(@Nonnull String itemId, @Nullable String metadata,
+                                       @Nullable String locale) {
+        return getTooltipData(itemId, metadata);
+    }
 }

@@ -3,10 +3,15 @@ package org.herolias.tooltips.api;
 import com.hypixel.hytale.protocol.AssetIconProperties;
 import com.hypixel.hytale.protocol.ColorLight;
 import com.hypixel.hytale.protocol.ItemAppearanceCondition;
+import com.hypixel.hytale.protocol.ItemArmor;
+import com.hypixel.hytale.protocol.ItemArmorSlot;
 import com.hypixel.hytale.protocol.ItemEntityConfig;
 import com.hypixel.hytale.protocol.ItemPullbackConfiguration;
+import com.hypixel.hytale.protocol.ItemTool;
+import com.hypixel.hytale.protocol.ItemWeapon;
 import com.hypixel.hytale.protocol.ModelParticle;
 import com.hypixel.hytale.protocol.ModelTrail;
+import com.hypixel.hytale.protocol.Modifier;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -52,6 +57,15 @@ public final class ItemVisualOverrides {
     @Nullable private final ItemEntityConfig itemEntity;
     @Nullable private final Double durability;
 
+    // ── Stat / tooltip structure overrides ──
+    @Nullable private final ItemArmor armor;
+    @Nullable private final ItemWeapon weapon;
+    @Nullable private final ItemTool tool;
+
+    // ── Additive stat modifier maps (merged with original) ──
+    @Nullable private final Map<Integer, Modifier[]> additionalArmorStatModifiers;
+    @Nullable private final Map<Integer, Modifier[]> additionalWeaponStatModifiers;
+
     private ItemVisualOverrides(Builder builder) {
         this.model = builder.model;
         this.texture = builder.texture;
@@ -79,6 +93,11 @@ public final class ItemVisualOverrides {
         this.displayEntityStatsHUD = builder.displayEntityStatsHUD;
         this.itemEntity = builder.itemEntity;
         this.durability = builder.durability;
+        this.armor = builder.armor;
+        this.weapon = builder.weapon;
+        this.tool = builder.tool;
+        this.additionalArmorStatModifiers = builder.additionalArmorStatModifiers;
+        this.additionalWeaponStatModifiers = builder.additionalWeaponStatModifiers;
     }
 
     // ── Getters (existing) ──
@@ -113,6 +132,22 @@ public final class ItemVisualOverrides {
     @Nullable public ItemEntityConfig getItemEntity() { return itemEntity; }
     @Nullable public Double getDurability() { return durability; }
 
+    // ── Getters (stat/tooltip structure overrides) ──
+
+    /** Returns the armor override, or {@code null} if not set. */
+    @Nullable public ItemArmor getArmor() { return armor; }
+    /** Returns the weapon override, or {@code null} if not set. */
+    @Nullable public ItemWeapon getWeapon() { return weapon; }
+    /** Returns the tool override, or {@code null} if not set. */
+    @Nullable public ItemTool getTool() { return tool; }
+
+    // ── Getters (additive stat modifiers) ──
+
+    /** Returns additive armor stat modifiers to merge with the original, or {@code null}. */
+    @Nullable public Map<Integer, Modifier[]> getAdditionalArmorStatModifiers() { return additionalArmorStatModifiers; }
+    /** Returns additive weapon stat modifiers to merge with the original, or {@code null}. */
+    @Nullable public Map<Integer, Modifier[]> getAdditionalWeaponStatModifiers() { return additionalWeaponStatModifiers; }
+
     /**
      * Returns true if this instance has no overrides set.
      */
@@ -127,7 +162,9 @@ public final class ItemVisualOverrides {
                 && itemAppearanceConditions == null && pullbackConfig == null
                 && clipsGeometry == null && renderDeployablePreview == null
                 && set == null && categories == null && displayEntityStatsHUD == null
-                && itemEntity == null && durability == null;
+                && itemEntity == null && durability == null
+                && armor == null && weapon == null && tool == null
+                && additionalArmorStatModifiers == null && additionalWeaponStatModifiers == null;
     }
 
     /**
@@ -161,6 +198,11 @@ public final class ItemVisualOverrides {
         if (displayEntityStatsHUD != null) sb.append("|desh:").append(Arrays.hashCode(displayEntityStatsHUD));
         if (itemEntity != null) sb.append("|ie:").append(itemEntity.hashCode());
         if (durability != null) sb.append("|dur:").append(durability);
+        if (armor != null) sb.append("|arm:").append(armor.hashCode());
+        if (weapon != null) sb.append("|wpn:").append(weapon.hashCode());
+        if (tool != null) sb.append("|tl:").append(tool.hashCode());
+        if (additionalArmorStatModifiers != null) sb.append("|aasm:").append(additionalArmorStatModifiers.hashCode());
+        if (additionalWeaponStatModifiers != null) sb.append("|awsm:").append(additionalWeaponStatModifiers.hashCode());
     }
 
     @Nonnull
@@ -197,6 +239,13 @@ public final class ItemVisualOverrides {
         private int[] displayEntityStatsHUD;
         private ItemEntityConfig itemEntity;
         private Double durability;
+        // Stat/tooltip structure overrides
+        private ItemArmor armor;
+        private ItemWeapon weapon;
+        private ItemTool tool;
+        // Additive stat modifiers (merged with original)
+        private Map<Integer, Modifier[]> additionalArmorStatModifiers;
+        private Map<Integer, Modifier[]> additionalWeaponStatModifiers;
 
         private Builder() {}
 
@@ -245,9 +294,192 @@ public final class ItemVisualOverrides {
         /** Override the max durability shown in the tooltip (purely visual). */
         @Nonnull public Builder durability(@Nullable Double durability) { this.durability = durability; return this; }
 
+        // ── Stat / tooltip structure overrides (raw protocol objects) ──
+
+        /**
+         * Override the entire armor configuration (slot, modifiers, resistances).
+         * <p>For simpler use cases, see {@link #armorSlot(ItemArmorSlot)},
+         * {@link #armorBaseDamageResistance(double)}, and
+         * {@link #armorStatModifiers(Map)}.</p>
+         */
+        @Nonnull public Builder armor(@Nullable ItemArmor armor) { this.armor = armor; return this; }
+
+        /**
+         * Override the entire weapon configuration (stat modifiers, dual wield, etc.).
+         * <p>For simpler use cases, see {@link #weaponStatModifiers(Map)}.</p>
+         */
+        @Nonnull public Builder weapon(@Nullable ItemWeapon weapon) { this.weapon = weapon; return this; }
+
+        /**
+         * Override the entire tool configuration (specs, speed).
+         * <p>For a simpler use case, see {@link #toolSpeed(float)}.</p>
+         */
+        @Nonnull public Builder tool(@Nullable ItemTool tool) { this.tool = tool; return this; }
+
+        // ── Convenience methods (create protocol objects under the hood) ──
+
+        /**
+         * Convenience: override only the armor slot shown in the tooltip.
+         * Creates an {@link ItemArmor} internally if not already set via {@link #armor(ItemArmor)}.
+         *
+         * @param slot the armor slot to display (Head, Chest, Hands, Legs)
+         */
+        @Nonnull
+        public Builder armorSlot(@Nonnull ItemArmorSlot slot) {
+            ensureArmor().armorSlot = slot;
+            return this;
+        }
+
+        /**
+         * Convenience: override the base damage resistance shown in the armor tooltip section.
+         */
+        @Nonnull
+        public Builder armorBaseDamageResistance(double resistance) {
+            ensureArmor().baseDamageResistance = resistance;
+            return this;
+        }
+
+        /**
+         * Convenience: override the stat modifiers displayed in the armor tooltip section.
+         * Keys are entity stat indices; values are arrays of {@link Modifier}.
+         */
+        @Nonnull
+        public Builder armorStatModifiers(@Nullable Map<Integer, Modifier[]> modifiers) {
+            ensureArmor().statModifiers = modifiers;
+            return this;
+        }
+
+        /**
+         * Convenience: override the damage resistance map in the armor tooltip section.
+         * Keys are damage type identifiers; values are arrays of {@link Modifier}.
+         */
+        @Nonnull
+        public Builder armorDamageResistance(@Nullable Map<String, Modifier[]> resistance) {
+            ensureArmor().damageResistance = resistance;
+            return this;
+        }
+
+        /**
+         * Convenience: override the stat modifiers displayed in the weapon tooltip section.
+         * Keys are entity stat indices; values are arrays of {@link Modifier}.
+         */
+        @Nonnull
+        public Builder weaponStatModifiers(@Nullable Map<Integer, Modifier[]> modifiers) {
+            ensureWeapon().statModifiers = modifiers;
+            return this;
+        }
+
+        /**
+         * Convenience: override the tool speed shown in the tooltip.
+         */
+        @Nonnull
+        public Builder toolSpeed(float speed) {
+            ensureTool().speed = speed;
+            return this;
+        }
+
+        // ── Additive convenience methods (merge with original item's modifiers) ──
+
+        /**
+         * Convenience: <b>add</b> a stat modifier to the armor tooltip section,
+         * preserving the original item's existing modifiers.
+         * <p>Unlike {@link #armorStatModifiers(Map)}, which replaces all modifiers,
+         * this method appends to the original item's modifier list.
+         *
+         * @param statIndex the entity stat index to modify
+         * @param modifier  the modifier to add
+         */
+        @Nonnull
+        public Builder addArmorStatModifier(int statIndex, @Nonnull Modifier modifier) {
+            if (this.additionalArmorStatModifiers == null) this.additionalArmorStatModifiers = new java.util.HashMap<>();
+            this.additionalArmorStatModifiers.merge(statIndex,
+                    new Modifier[]{modifier},
+                    ItemVisualOverrides::concatModifiers);
+            return this;
+        }
+
+        /**
+         * Convenience: <b>add</b> multiple stat modifiers to the armor tooltip section,
+         * preserving the original item's existing modifiers.
+         *
+         * @param modifiers map of stat index → modifiers to add
+         */
+        @Nonnull
+        public Builder addArmorStatModifiers(@Nonnull Map<Integer, Modifier[]> modifiers) {
+            if (this.additionalArmorStatModifiers == null) this.additionalArmorStatModifiers = new java.util.HashMap<>();
+            for (Map.Entry<Integer, Modifier[]> entry : modifiers.entrySet()) {
+                this.additionalArmorStatModifiers.merge(entry.getKey(),
+                        entry.getValue(),
+                        ItemVisualOverrides::concatModifiers);
+            }
+            return this;
+        }
+
+        /**
+         * Convenience: <b>add</b> a stat modifier to the weapon tooltip section,
+         * preserving the original item's existing modifiers.
+         *
+         * @param statIndex the entity stat index to modify
+         * @param modifier  the modifier to add
+         */
+        @Nonnull
+        public Builder addWeaponStatModifier(int statIndex, @Nonnull Modifier modifier) {
+            if (this.additionalWeaponStatModifiers == null) this.additionalWeaponStatModifiers = new java.util.HashMap<>();
+            this.additionalWeaponStatModifiers.merge(statIndex,
+                    new Modifier[]{modifier},
+                    ItemVisualOverrides::concatModifiers);
+            return this;
+        }
+
+        /**
+         * Convenience: <b>add</b> multiple stat modifiers to the weapon tooltip section,
+         * preserving the original item's existing modifiers.
+         *
+         * @param modifiers map of stat index → modifiers to add
+         */
+        @Nonnull
+        public Builder addWeaponStatModifiers(@Nonnull Map<Integer, Modifier[]> modifiers) {
+            if (this.additionalWeaponStatModifiers == null) this.additionalWeaponStatModifiers = new java.util.HashMap<>();
+            for (Map.Entry<Integer, Modifier[]> entry : modifiers.entrySet()) {
+                this.additionalWeaponStatModifiers.merge(entry.getKey(),
+                        entry.getValue(),
+                        ItemVisualOverrides::concatModifiers);
+            }
+            return this;
+        }
+
+        // ── Internal helpers for convenience methods ──
+
+        @Nonnull
+        private ItemArmor ensureArmor() {
+            if (this.armor == null) this.armor = new ItemArmor();
+            return this.armor;
+        }
+
+        @Nonnull
+        private ItemWeapon ensureWeapon() {
+            if (this.weapon == null) this.weapon = new ItemWeapon();
+            return this.weapon;
+        }
+
+        @Nonnull
+        private ItemTool ensureTool() {
+            if (this.tool == null) this.tool = new ItemTool();
+            return this.tool;
+        }
+
         @Nonnull
         public ItemVisualOverrides build() {
             return new ItemVisualOverrides(this);
         }
+    }
+
+    // ── Static helper for merging modifier arrays ──
+
+    @Nonnull
+    static Modifier[] concatModifiers(@Nonnull Modifier[] a, @Nonnull Modifier[] b) {
+        Modifier[] result = Arrays.copyOf(a, a.length + b.length);
+        System.arraycopy(b, 0, result, a.length, b.length);
+        return result;
     }
 }

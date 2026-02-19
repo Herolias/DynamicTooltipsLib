@@ -107,7 +107,18 @@ public class TooltipRegistry {
      */
     @Nullable
     public ComposedTooltip getComposed(@Nonnull String combinedHash) {
-        return composedCache.get(combinedHash);
+        // Fast path: exact match for locale-less entries
+        ComposedTooltip exact = composedCache.get(combinedHash);
+        if (exact != null) return exact;
+
+        // Fallback: find any locale-specific entry with this hash
+        String prefix = combinedHash + ":";
+        for (Map.Entry<String, ComposedTooltip> entry : composedCache.entrySet()) {
+            if (entry.getKey().startsWith(prefix)) {
+                return entry.getValue();
+            }
+        }
+        return null;
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -118,15 +129,7 @@ public class TooltipRegistry {
      * Queries all registered providers for the given item and composes
      * their contributions.
      * <p>
-     * Uses a two-level cache:
-     * <ol>
-     *   <li><b>Item-state cache</b> — keyed by {@code (itemId, metadata)}.
-     *       If the exact same item state has been seen before, returns instantly
-     *       without calling any provider.</li>
-     *   <li><b>Composed cache</b> — keyed by combined hash. If different items
-     *       happen to produce the same provider outputs, they share the composed
-     *       result.</li>
-     * </ol>
+     * Delegates to {@link #compose(String, String, String)} with {@code null} locale.
      *
      * @param itemId   the real item ID
      * @param metadata the item's metadata JSON, or null
@@ -134,8 +137,34 @@ public class TooltipRegistry {
      */
     @Nullable
     public ComposedTooltip compose(@Nonnull String itemId, @Nullable String metadata) {
-        // ── Fast path: item-state cache ──
-        String stateKey = metadata != null ? itemId + "\0" + metadata : itemId;
+        return compose(itemId, metadata, null);
+    }
+
+    /**
+     * Queries all registered providers for the given item and composes
+     * their contributions, with locale context for per-player translations.
+     * <p>
+     * Uses a two-level cache:
+     * <ol>
+     *   <li><b>Item-state cache</b> — keyed by {@code (itemId, metadata, locale)}.
+     *       If the exact same item state has been seen before, returns instantly
+     *       without calling any provider.</li>
+     *   <li><b>Composed cache</b> — keyed by combined hash + locale. If different items
+     *       happen to produce the same provider outputs, they share the composed
+     *       result.</li>
+     * </ol>
+     *
+     * @param itemId   the real item ID
+     * @param metadata the item's metadata JSON, or null
+     * @param locale   the player's language code (e.g. "en-US"), or null if unknown
+     * @return a composed tooltip, or {@code null} if no provider has anything
+     */
+    @Nullable
+    public ComposedTooltip compose(@Nonnull String itemId, @Nullable String metadata,
+                                   @Nullable String locale) {
+        // ── Fast path: item-state cache (locale-aware) ──
+        String localeSuffix = locale != null ? "\1" + locale : "";
+        String stateKey = (metadata != null ? itemId + "\0" + metadata : itemId) + localeSuffix;
         ComposedTooltip stateCached = itemStateCache.get(stateKey);
         if (stateCached != null) {
             return stateCached == EMPTY_SENTINEL ? null : stateCached;
@@ -148,7 +177,7 @@ public class TooltipRegistry {
 
         for (TooltipProvider provider : snapshot) {
             try {
-                TooltipData data = provider.getTooltipData(itemId, metadata);
+                TooltipData data = provider.getTooltipData(itemId, metadata, locale);
                 if (data != null && !data.isEmpty()) {
                     if (results == null) results = new ArrayList<>(snapshot.size());
                     results.add(new ProviderResult(provider, data));
@@ -187,9 +216,10 @@ public class TooltipRegistry {
         String combinedHashInput = hashBuilder.toString();
         String combinedHash = computeHash(combinedHashInput);
 
-        // Check composed cache
+        // Check composed cache (locale-aware key to avoid mixing languages)
+        String composedCacheKey = locale != null ? combinedHash + ":" + locale : combinedHash;
         final List<ProviderResult> finalResults = results;
-        ComposedTooltip result = composedCache.computeIfAbsent(combinedHash, h ->
+        ComposedTooltip result = composedCache.computeIfAbsent(composedCacheKey, h ->
                 buildComposedTooltip(finalResults, combinedHash));
 
         cacheItemState(stateKey, result);
@@ -266,6 +296,11 @@ public class TooltipRegistry {
                 if (vo.getDisplayEntityStatsHUD() != null) visualBuilder.displayEntityStatsHUD(vo.getDisplayEntityStatsHUD());
                 if (vo.getItemEntity() != null) visualBuilder.itemEntity(vo.getItemEntity());
                 if (vo.getDurability() != null) visualBuilder.durability(vo.getDurability());
+                if (vo.getArmor() != null) visualBuilder.armor(vo.getArmor());
+                if (vo.getWeapon() != null) visualBuilder.weapon(vo.getWeapon());
+                if (vo.getTool() != null) visualBuilder.tool(vo.getTool());
+                if (vo.getAdditionalArmorStatModifiers() != null) visualBuilder.addArmorStatModifiers(vo.getAdditionalArmorStatModifiers());
+                if (vo.getAdditionalWeaponStatModifiers() != null) visualBuilder.addWeaponStatModifiers(vo.getAdditionalWeaponStatModifiers());
             }
 
             allLines.addAll(data.getLines());

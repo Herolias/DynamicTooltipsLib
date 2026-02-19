@@ -27,7 +27,7 @@ I will add more features and update the library regularly.
 
 - **Per-Item Unique Tooltips**: Display durability, enchantment stats, kill counters, or lore specific to an individual item instance.
 - **Mod Compatibility**: Uses a **Priority System** so multiple mods can add lines to the same item without conflict.
-
+- **Locale-Aware Tooltips**: Providers receive the player's language code, enabling per-player translated tooltip content without extra packet work.
 - **Uniform Virtual IDs**: Uses per-instance virtual item IDs for **all** inventory sections (hotbar, utility, tools, armor, storage, etc.), with an inbound filter to translate IDs back for interaction packets.
 - **High Performance**: Caches item states and packet diffs to minimize network traffic and CPU usage.
 
@@ -93,18 +93,27 @@ public class MyEnchantmentTooltipProvider implements TooltipProvider {
 
     @Override
     public TooltipData getTooltipData(String itemId, String metadata) {
+        // Fallback for calls without locale context (e.g. entity updates)
+        return getTooltipData(itemId, metadata, "en-US");
+    }
+
+    @Override
+    public TooltipData getTooltipData(String itemId, String metadata, String locale) {
         if (metadata == null || !metadata.contains("my-metadata")) return null;
 
         // Parse your metadata...
-        // ...
+        // Use 'locale' to resolve translated text (e.g. via I18nModule)
+        String label = resolveTranslation("enchantment.sharpness", locale, "Sharpness");
 
         return TooltipData.builder()
             .hashInput("sharpness:5") // REQUIRED: Unique hash for caching
-            .addLine("<color is=\"#FFAA00\">Sharpness V</color>")
+            .addLine("<color is=\"#FFAA00\">" + label + " V</color>")
             .build();
     }
 }
 ```
+
+> **Note:** The `locale` parameter (e.g. `"en-US"`, `"de-DE"`) is passed automatically by the library during inventory packet processing. Compositions are cached per-locale, so each player sees tooltips in their own language.
 
 ### 2. Register the Provider
 
@@ -144,6 +153,20 @@ These methods replace existing item properties. If multiple providers set these,
 
 #### State Methods
 *   `hashInput(String input)`: **Required.** A deterministic string representing the item's state (e.g., `enchant:sharpness:5`). Used for caching virtual IDs.
+
+### Locale-Aware Providers
+
+By default, `getTooltipData(itemId, metadata)` is called without locale context. To produce translated tooltips, override the locale-aware variant:
+
+```java
+@Override
+public TooltipData getTooltipData(String itemId, String metadata, String locale) {
+    // 'locale' is the player's language code, e.g. "de-DE"
+    // Build localized additive lines here
+}
+```
+
+The library caches compositions per-locale automatically. The `locale` may be `null` in contexts where a player language is unavailable (e.g. entity updates for other players); in that case, fall back to `"en-US"`.
 
 ### Visual Overrides Reference
 <p align="center" width="100%">
@@ -209,6 +232,61 @@ The following fields map directly to `ItemBase` properties. Some of them are exp
 | `itemEntity` | `ItemEntityConfig` | Particle system, color, and visibility for dropped items |
 | **Durability** | | |
 | `durability` | `Double` | Max durability shown in tooltip (visual only) |
+| **Armor / Weapon / Tool (EXPERIMENTAL)** | | |
+| `armor` | `ItemArmor` | Replace the entire armor config (slot, modifiers, resistances) |
+| `weapon` | `ItemWeapon` | Replace the entire weapon config (stat modifiers, dual wield) |
+| `tool` | `ItemTool` | Replace the entire tool config (specs, speed) |
+
+#### Convenience Methods (EXPERIMENTAL)
+
+For common use cases, the builder also provides convenience methods that create the protocol objects for you:
+
+| Method | Effect |
+| :--- | :--- |
+| `.armorSlot(ItemArmorSlot)` | Set which slot label to display (Head, Chest, Hands, Legs) |
+| `.armorBaseDamageResistance(double)` | Set the base damage resistance number |
+| `.armorStatModifiers(Map)` | **Replace** all armor stat modifiers |
+| `.armorDamageResistance(Map)` | **Replace** the damage resistance map |
+| `.weaponStatModifiers(Map)` | **Replace** all weapon stat modifiers |
+| `.toolSpeed(float)` | Set the tool speed value |
+
+> **Note:** The convenience methods above (`armorSlot`, `armorStatModifiers`, etc.) are **destructive** — they create a new armor/weapon/tool object that replaces the original item's data.
+
+#### Additive Stat Modifiers
+
+To **add** stat modifiers on top of the original item's existing ones (preserving them), use the additive API:
+
+| Method | Effect |
+| :--- | :--- |
+| `.addArmorStatModifier(int statIndex, Modifier)` | Append a single modifier to armor stats |
+| `.addArmorStatModifiers(Map)` | Append multiple modifiers to armor stats |
+| `.addWeaponStatModifier(int statIndex, Modifier)` | Append a single modifier to weapon stats |
+| `.addWeaponStatModifiers(Map)` | Append multiple modifiers to weapon stats |
+
+```java
+// Example: add +5 bonus Health to an armor piece, preserving original modifiers
+int healthIndex = DefaultEntityStatTypes.getHealth();
+Modifier bonus = new Modifier(ModifierTarget.Max, CalculationType.Additive, 5.0f);
+
+ItemVisualOverrides overrides = ItemVisualOverrides.builder()
+    .addArmorStatModifier(healthIndex, bonus)
+    .build();
+```
+
+#### Entity Stat Indices
+
+Stat indices are resolved at runtime. Use `DefaultEntityStatTypes` to get the correct index:
+
+| Method | Stat |
+| :--- | :--- |
+| `DefaultEntityStatTypes.getHealth()` | Health |
+| `DefaultEntityStatTypes.getMana()` | Mana |
+| `DefaultEntityStatTypes.getStamina()` | Stamina |
+| `DefaultEntityStatTypes.getOxygen()` | Oxygen |
+| `DefaultEntityStatTypes.getSignatureEnergy()` | Signature Energy |
+| `DefaultEntityStatTypes.getAmmo()` | Ammo |
+
+> **Tip:** Do not use hardcoded stat indices (e.g. `0`, `1`). The mapping is loaded from game assets at runtime and may differ between versions.
 
 ---
 

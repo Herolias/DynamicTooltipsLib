@@ -2,8 +2,11 @@ package org.herolias.tooltips.internal;
 
 import com.hypixel.hytale.logger.HytaleLogger;
 import com.hypixel.hytale.protocol.ItemBase;
+import com.hypixel.hytale.protocol.ItemArmor;
 import com.hypixel.hytale.protocol.ItemEntityConfig;
 import com.hypixel.hytale.protocol.ItemTranslationProperties;
+import com.hypixel.hytale.protocol.ItemWeapon;
+import com.hypixel.hytale.protocol.Modifier;
 import com.hypixel.hytale.server.core.asset.type.item.config.Item;
 import com.hypixel.hytale.server.core.modules.i18n.I18nModule;
 
@@ -251,6 +254,25 @@ public class VirtualItemRegistry {
                     if (visualOverrides.getDisplayEntityStatsHUD() != null) clone.displayEntityStatsHUD = visualOverrides.getDisplayEntityStatsHUD();
                     if (visualOverrides.getItemEntity() != null) clone.itemEntity = visualOverrides.getItemEntity();
                     if (visualOverrides.getDurability() != null) clone.durability = visualOverrides.getDurability();
+                    if (visualOverrides.getArmor() != null) clone.armor = visualOverrides.getArmor();
+                    if (visualOverrides.getWeapon() != null) clone.weapon = visualOverrides.getWeapon();
+                    if (visualOverrides.getTool() != null) clone.tool = visualOverrides.getTool();
+
+                    // ── Additive stat modifier merge ──
+                    // Unlike the replace-style overrides above, these MERGE with
+                    // the original item's existing stat modifiers.
+                    if (visualOverrides.getAdditionalArmorStatModifiers() != null) {
+                        if (clone.armor == null) clone.armor = new ItemArmor();
+                        clone.armor.statModifiers = mergeModifierMaps(
+                                clone.armor.statModifiers,
+                                visualOverrides.getAdditionalArmorStatModifiers());
+                    }
+                    if (visualOverrides.getAdditionalWeaponStatModifiers() != null) {
+                        if (clone.weapon == null) clone.weapon = new ItemWeapon();
+                        clone.weapon.statModifiers = mergeModifierMaps(
+                                clone.weapon.statModifiers,
+                                visualOverrides.getAdditionalWeaponStatModifiers());
+                    }
                 }
 
                 // ── Auto-resolve rarity particles ──
@@ -586,5 +608,34 @@ public class VirtualItemRegistry {
         originalDescriptionCache.clear();
         originalNameCache.clear();
         builtDescriptionCache.clear();
+    }
+
+    // ── Static helper for merging modifier maps ──
+
+    /**
+     * Merges two modifier maps. For shared keys, modifier arrays are concatenated.
+     *
+     * @param original   the original item's modifiers (may be null)
+     * @param additional the modifiers to add
+     * @return a new merged map
+     */
+    @Nonnull
+    private static Map<Integer, Modifier[]> mergeModifierMaps(
+            @Nullable Map<Integer, Modifier[]> original,
+            @Nonnull Map<Integer, Modifier[]> additional) {
+
+        if (original == null || original.isEmpty()) {
+            return new HashMap<>(additional);
+        }
+
+        Map<Integer, Modifier[]> merged = new HashMap<>(original);
+        for (Map.Entry<Integer, Modifier[]> entry : additional.entrySet()) {
+            merged.merge(entry.getKey(), entry.getValue(), (a, b) -> {
+                Modifier[] result = java.util.Arrays.copyOf(a, a.length + b.length);
+                System.arraycopy(b, 0, result, a.length, b.length);
+                return result;
+            });
+        }
+        return merged;
     }
 }

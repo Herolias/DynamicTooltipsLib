@@ -690,53 +690,52 @@ public class TooltipPacketAdapter {
                 if (comp instanceof ItemUpdate) {
                     ItemUpdate itemUpdate = (ItemUpdate) comp;
                     if (itemUpdate.item != null
-                        && itemUpdate.item.itemId != null && !itemUpdate.item.itemId.isEmpty()
-                        && !VirtualItemRegistry.isVirtualId(itemUpdate.item.itemId)) {
+                        && itemUpdate.item.itemId != null && !itemUpdate.item.itemId.isEmpty()) {
 
-                    TooltipRegistry.ComposedTooltip composed = tooltipRegistry.compose(
-                            itemUpdate.item.itemId, itemUpdate.item.metadata);
-                    if (composed != null && composed.getVisualOverrides() != null
-                            && !composed.getVisualOverrides().isEmpty()) {
+                        String currentItemId = itemUpdate.item.itemId;
+                        boolean alreadyVirtual = VirtualItemRegistry.isVirtualId(currentItemId);
+                        String baseItemId = alreadyVirtual ? VirtualItemRegistry.getBaseItemId(currentItemId) : currentItemId;
 
-                        String baseItemId = itemUpdate.item.itemId;
+                        if (baseItemId != null) {
+                            TooltipRegistry.ComposedTooltip composed = tooltipRegistry.compose(
+                                    baseItemId, itemUpdate.item.metadata, playerRef.getLanguage());
+                            if (composed != null && composed.getVisualOverrides() != null
+                                    && !composed.getVisualOverrides().isEmpty()) {
 
-                        // For dropped items, always resolve an effective name so the
-                        // virtual ItemBase uses a virtual name key in its
-                        // translationProperties — otherwise the client can't resolve
-                        // the name on pickup.
-                        String effectiveName = composed.getNameOverride();
-                        if (effectiveName == null) {
-                            effectiveName = virtualItemRegistry.getOriginalName(
-                                    baseItemId, playerRef.getLanguage());
-                        }
+                                String effectiveName = composed.getNameOverride();
+                                if (effectiveName == null) {
+                                    effectiveName = virtualItemRegistry.getOriginalName(
+                                            baseItemId, playerRef.getLanguage());
+                                }
 
-                        String virtualId = virtualItemRegistry.generateVirtualId(
-                                baseItemId, composed.getCombinedHash());
-                        ItemBase virtualBase = virtualItemRegistry.getOrCreateVirtualItemBase(
-                                baseItemId, virtualId, effectiveName,
-                                composed.getVisualOverrides(),
-                                composed.getNameTranslationKey(),
-                                composed.getDescriptionTranslationKey());
+                                String virtualId = virtualItemRegistry.generateVirtualId(
+                                        baseItemId, composed.getCombinedHash());
+                                ItemBase virtualBase = virtualItemRegistry.getOrCreateVirtualItemBase(
+                                        baseItemId, virtualId, effectiveName,
+                                        composed.getVisualOverrides(),
+                                        composed.getNameTranslationKey(),
+                                        composed.getDescriptionTranslationKey());
 
-                        if (virtualBase != null) {
-                            itemUpdate.item.itemId = virtualId;
-                            newVirtualItems.put(virtualId, virtualBase);
+                                if (virtualBase != null) {
+                                    itemUpdate.item.itemId = virtualId;
+                                    newVirtualItems.put(virtualId, virtualBase);
 
-                            String descKey = VirtualItemRegistry.getVirtualDescriptionKey(virtualId);
-                            String originalDesc = virtualItemRegistry.getOriginalDescription(
-                                    baseItemId, playerRef.getLanguage());
-                            String enrichedDesc = composed.buildDescription(originalDesc);
-                            translations.put(descKey, enrichedDesc);
+                                    String descKey = VirtualItemRegistry.getVirtualDescriptionKey(virtualId);
+                                    String originalDesc = virtualItemRegistry.getOriginalDescription(
+                                            baseItemId, playerRef.getLanguage());
+                                    String enrichedDesc = composed.buildDescription(originalDesc);
+                                    translations.put(descKey, enrichedDesc);
 
-                            // Always send the name translation under the virtual key
-                            String nameKey = VirtualItemRegistry.getVirtualNameKey(virtualId);
-                            if (effectiveName != null) {
-                                translations.put(nameKey, effectiveName);
+                                    // Always send the name translation under the virtual key
+                                    String nameKey = VirtualItemRegistry.getVirtualNameKey(virtualId);
+                                    if (effectiveName != null) {
+                                        translations.put(nameKey, effectiveName);
+                                    }
+                                }
                             }
                         }
                     }
                 }
-            }
         }
     }
 
@@ -758,37 +757,57 @@ public class TooltipPacketAdapter {
         // If the equipment update sets a right-hand item that is NOT virtual,
         // we check if it matches the base ID of the virtual item in the ACTIVE slot
         // of the OBSERVED player.
-        if (equipment.rightHandItemId != null && !VirtualItemRegistry.isVirtualId(equipment.rightHandItemId)) {
+        if (equipment.rightHandItemId != null) {
+            String currentRightId = equipment.rightHandItemId;
+            boolean rightAlreadyVirtual = VirtualItemRegistry.isVirtualId(currentRightId);
+            String rightBaseId = rightAlreadyVirtual ? VirtualItemRegistry.getBaseItemId(currentRightId) : currentRightId;
 
-            // Fix: Use authoritative active slot from server entity if available
-            Integer slotObj = null;
-            Player player = getObservedPlayerComponent(observedPlayerRef);
-            if (player != null) {
-                slotObj = (int) player.getInventory().getActiveHotbarSlot();
-            } else {
-                slotObj = playerActiveHotbarSlots.get(observedPlayerUuid);
-            }
-
-            // Default to slot 0 if unknown (reasonable fallback for initial join)
-            int slot = slotObj != null ? slotObj : 0;
-
-            String virtualId = virtualItemRegistry.getSlotVirtualId(observedPlayerUuid, "hotbar:" + slot);
-            if (virtualId != null) {
-                String baseId = VirtualItemRegistry.getBaseItemId(virtualId);
-                // If the packet assumes the base item, but we know it's virtual, swap it.
-                if (baseId != null && baseId.equals(equipment.rightHandItemId)) {
-                    equipment.rightHandItemId = virtualId;
-                    addVirtualEquipmentItem(recipientRef, baseId, virtualId, newVirtualItems, translations);
-                    rightHandVirtualized = true;
-
+            if (rightBaseId != null) {
+                // Fix: Use authoritative active slot from server entity if available
+                Integer slotObj = null;
+                Player player = getObservedPlayerComponent(observedPlayerRef);
+                if (player != null) {
+                    slotObj = (int) player.getInventory().getActiveHotbarSlot();
                 } else {
-                     // Fallback: If the active slot didn't match, scan the entire hotbar.
+                    slotObj = playerActiveHotbarSlots.get(observedPlayerUuid);
+                }
+
+                // Default to slot 0 if unknown (reasonable fallback for initial join)
+                int slot = slotObj != null ? slotObj : 0;
+
+                String virtualId = virtualItemRegistry.getSlotVirtualId(observedPlayerUuid, "hotbar:" + slot);
+                if (virtualId != null) {
+                    String trackedBaseId = VirtualItemRegistry.getBaseItemId(virtualId);
+                    // If the packet assumes the base item, but we know it's virtual, swap it.
+                    if (trackedBaseId != null && trackedBaseId.equals(rightBaseId)) {
+                        equipment.rightHandItemId = virtualId;
+                        addVirtualEquipmentItem(recipientRef, trackedBaseId, virtualId, newVirtualItems, translations);
+                        rightHandVirtualized = true;
+
+                    } else {
+                         // Fallback: If the active slot didn't match, scan the entire hotbar.
+                         for (int i = 0; i < 9; i++) {
+                             if (i == slot) continue; // Already checked
+                             String otherVirtualId = virtualItemRegistry.getSlotVirtualId(observedPlayerUuid, "hotbar:" + i);
+                             if (otherVirtualId != null) {
+                                 String otherBaseId = VirtualItemRegistry.getBaseItemId(otherVirtualId);
+                                 if (otherBaseId != null && otherBaseId.equals(rightBaseId)) {
+                                     equipment.rightHandItemId = otherVirtualId;
+                                     addVirtualEquipmentItem(recipientRef, otherBaseId, otherVirtualId, newVirtualItems, translations);
+                                     rightHandVirtualized = true;
+                                     break;
+                                 }
+                             }
+                         }
+                    }
+                } else {
+                     // Fallback: If the expected slot was empty/unknown, scan the hotbar anyway.
                      for (int i = 0; i < 9; i++) {
-                         if (i == slot) continue; // Already checked
+                         if (i == slot) continue;
                          String otherVirtualId = virtualItemRegistry.getSlotVirtualId(observedPlayerUuid, "hotbar:" + i);
                          if (otherVirtualId != null) {
                              String otherBaseId = VirtualItemRegistry.getBaseItemId(otherVirtualId);
-                             if (otherBaseId != null && otherBaseId.equals(equipment.rightHandItemId)) {
+                             if (otherBaseId != null && otherBaseId.equals(rightBaseId)) {
                                  equipment.rightHandItemId = otherVirtualId;
                                  addVirtualEquipmentItem(recipientRef, otherBaseId, otherVirtualId, newVirtualItems, translations);
                                  rightHandVirtualized = true;
@@ -797,21 +816,6 @@ public class TooltipPacketAdapter {
                          }
                      }
                 }
-            } else {
-                 // Fallback: If the expected slot was empty/unknown, scan the hotbar anyway.
-                 for (int i = 0; i < 9; i++) {
-                     if (i == slot) continue;
-                     String otherVirtualId = virtualItemRegistry.getSlotVirtualId(observedPlayerUuid, "hotbar:" + i);
-                     if (otherVirtualId != null) {
-                         String otherBaseId = VirtualItemRegistry.getBaseItemId(otherVirtualId);
-                         if (otherBaseId != null && otherBaseId.equals(equipment.rightHandItemId)) {
-                             equipment.rightHandItemId = otherVirtualId;
-                             addVirtualEquipmentItem(recipientRef, otherBaseId, otherVirtualId, newVirtualItems, translations);
-                             rightHandVirtualized = true;
-                             break;
-                         }
-                     }
-                 }
             }
         }
 
@@ -822,16 +826,22 @@ public class TooltipPacketAdapter {
 
         // Fix for off-hand (left hand) items not showing visual overrides.
         // The off-hand slot maps to "utility:0" in our registry.
-        if (equipment.leftHandItemId != null && !VirtualItemRegistry.isVirtualId(equipment.leftHandItemId)) {
-            // The off-hand is always utility slot 0 of the observed player
-            String virtualId = virtualItemRegistry.getSlotVirtualId(observedPlayerUuid, "utility:0");
+        if (equipment.leftHandItemId != null) {
+            String currentLeftId = equipment.leftHandItemId;
+            boolean leftAlreadyVirtual = VirtualItemRegistry.isVirtualId(currentLeftId);
+            String leftBaseId = leftAlreadyVirtual ? VirtualItemRegistry.getBaseItemId(currentLeftId) : currentLeftId;
 
-            if (virtualId != null) {
-                String baseId = VirtualItemRegistry.getBaseItemId(virtualId);
-                if (baseId != null && baseId.equals(equipment.leftHandItemId)) {
-                    equipment.leftHandItemId = virtualId;
-                    addVirtualEquipmentItem(recipientRef, baseId, virtualId, newVirtualItems, translations);
-                    leftHandVirtualized = true;
+            if (leftBaseId != null) {
+                // The off-hand is always utility slot 0 of the observed player
+                String virtualId = virtualItemRegistry.getSlotVirtualId(observedPlayerUuid, "utility:0");
+
+                if (virtualId != null) {
+                    String trackedBaseId = VirtualItemRegistry.getBaseItemId(virtualId);
+                    if (trackedBaseId != null && trackedBaseId.equals(leftBaseId)) {
+                        equipment.leftHandItemId = virtualId;
+                        addVirtualEquipmentItem(recipientRef, trackedBaseId, virtualId, newVirtualItems, translations);
+                        leftHandVirtualized = true;
+                    }
                 }
             }
         }
@@ -857,24 +867,27 @@ public class TooltipPacketAdapter {
         if (stack == null) return false;
 
         String stackItemId = stack.getItemId();
-        if (stackItemId == null || stackItemId.isEmpty() || VirtualItemRegistry.isVirtualId(stackItemId)) {
-            return false;
-        }
+        if (stackItemId == null || stackItemId.isEmpty()) return false;
+        boolean stackAlreadyVirtual = VirtualItemRegistry.isVirtualId(stackItemId);
+        String stackBaseId = stackAlreadyVirtual ? VirtualItemRegistry.getBaseItemId(stackItemId) : stackItemId;
+        if (stackBaseId == null) return false;
 
         String equipmentItemId = leftHand ? equipment.leftHandItemId : equipment.rightHandItemId;
-        if (equipmentItemId == null || equipmentItemId.isEmpty() || VirtualItemRegistry.isVirtualId(equipmentItemId)) {
-            return false;
-        }
+        if (equipmentItemId == null || equipmentItemId.isEmpty()) return false;
+        boolean equipAlreadyVirtual = VirtualItemRegistry.isVirtualId(equipmentItemId);
+        String equipBaseId = equipAlreadyVirtual ? VirtualItemRegistry.getBaseItemId(equipmentItemId) : equipmentItemId;
+        if (equipBaseId == null) return false;
 
         // Guard against desynced snapshots: only rewrite when equipment and inventory agree.
-        if (!stackItemId.equals(equipmentItemId)) {
+        if (!stackBaseId.equals(equipBaseId)) {
             return false;
         }
 
-        TooltipRegistry.ComposedTooltip composed = tooltipRegistry.compose(stackItemId, stack.toPacket().metadata);
+        TooltipRegistry.ComposedTooltip composed = tooltipRegistry.compose(
+                stackBaseId, stack.toPacket().metadata, recipientRef.getLanguage());
         if (composed == null) return false;
 
-        String virtualId = VirtualItemRegistry.generateVirtualId(stackItemId, composed.getCombinedHash());
+        String virtualId = VirtualItemRegistry.generateVirtualId(stackBaseId, composed.getCombinedHash());
         if (leftHand) {
             equipment.leftHandItemId = virtualId;
             virtualItemRegistry.trackSlotVirtualId(observedPlayerRef.getUuid(), "utility:0", virtualId);
@@ -886,11 +899,11 @@ public class TooltipPacketAdapter {
             }
         }
 
-        addVirtualEquipmentItem(recipientRef, stackItemId, virtualId, newVirtualItems, translations);
+        addVirtualEquipmentItem(recipientRef, stackBaseId, virtualId, newVirtualItems, translations);
 
         String descKey = VirtualItemRegistry.getVirtualDescriptionKey(virtualId);
         if (!translations.containsKey(descKey)) {
-            String originalDesc = virtualItemRegistry.getOriginalDescription(stackItemId, recipientRef.getLanguage());
+            String originalDesc = virtualItemRegistry.getOriginalDescription(stackBaseId, recipientRef.getLanguage());
             String enrichedDesc = composed.buildDescription(originalDesc);
             translations.put(descKey, enrichedDesc);
             virtualItemRegistry.cacheDescription(virtualId, enrichedDesc);
@@ -1014,9 +1027,9 @@ public class TooltipPacketAdapter {
 
             if (VirtualItemRegistry.isVirtualId(itemPacket.itemId)) continue;
 
-            // Query all tooltip providers via the registry
+            // Query all tooltip providers via the registry (with locale for per-player translations)
             TooltipRegistry.ComposedTooltip composed = tooltipRegistry.compose(
-                    itemPacket.itemId, itemPacket.metadata);
+                    itemPacket.itemId, itemPacket.metadata, language);
 
             if (composed == null) {
                 if (sectionName != null) {
