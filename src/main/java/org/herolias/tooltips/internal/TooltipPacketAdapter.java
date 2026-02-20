@@ -540,19 +540,23 @@ public class TooltipPacketAdapter {
             ItemWithAllMetadata item = entry.getValue();
             if (item == null || item.itemId == null) continue;
 
-            // We must find out if this item is currently virtualized for the player
-            // Since this section is from lastRawInventory, it contains the TRUE base IDs.
-            // We need to check if we generated a virtual ID for it via our tracking.
+
+            // If somehow a virtual ID made it into lastRawInventory, resolve it back to base ID first
+            String baseItemId = VirtualItemRegistry.isVirtualId(item.itemId)
+                    ? VirtualItemRegistry.getBaseItemId(item.itemId)
+                    : item.itemId;
+
+            if (baseItemId == null) continue;
 
             // To do this reliably, we simply try to compose it.
             // If it has a composed tooltip, then it is virtualized on the client.
             TooltipRegistry.ComposedTooltip composed = tooltipRegistry.compose(
-                    item.itemId, item.metadata, "en"); // Language doesn't matter here, we only need the base ID
+                    baseItemId, item.metadata, "en"); // Language doesn't matter here, we only need the base ID
             
             if (composed != null) {
                 // This item IS virtualized on the client. To allow the client to use it
                 // in crafting, we must append its base ID to ExtraResources.
-                virtualBaseQuantities.merge(item.itemId, item.quantity, Integer::sum);
+                virtualBaseQuantities.merge(baseItemId, item.quantity, Integer::sum);
             }
         }
     }
@@ -799,7 +803,9 @@ public class TooltipPacketAdapter {
                                         composed.getDescriptionTranslationKey());
 
                                 if (virtualBase != null) {
-                                    itemUpdate.item.itemId = virtualId;
+                                    ItemWithAllMetadata clonedItem = itemUpdate.item.clone();
+                                    clonedItem.itemId = virtualId;
+                                    itemUpdate.item = clonedItem;
                                     newVirtualItems.put(virtualId, virtualBase);
 
                                     String descKey = VirtualItemRegistry.getVirtualDescriptionKey(virtualId);
