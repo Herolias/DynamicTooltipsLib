@@ -7,6 +7,7 @@ import com.hypixel.hytale.protocol.ItemEntityConfig;
 import com.hypixel.hytale.protocol.ItemTranslationProperties;
 import com.hypixel.hytale.protocol.ItemWeapon;
 import com.hypixel.hytale.protocol.Modifier;
+import com.hypixel.hytale.protocol.ItemResourceType;
 import com.hypixel.hytale.server.core.asset.type.item.config.Item;
 import com.hypixel.hytale.server.core.modules.i18n.I18nModule;
 
@@ -288,10 +289,18 @@ public class VirtualItemRegistry {
                     }
                 }
 
-                // Null out resourceTypes on virtual items.
-                // The client will use ExtraResources to satisfy ResourceType-based recipes.
-                // If the virtual item keeps its ResourceTypes, the client double-counts!
-                clone.resourceTypes = null;
+                // Prevent double-counting in crafting grids by setting resource quantity to 0.
+                // We MUST NOT set resourceTypes to null, because Furnaces and other machinery 
+                // explicitly check for the presence of the resource type (e.g. "Fuel") 
+                // to allow the item into the slot initially.
+                if (clone.resourceTypes != null) {
+                    ItemResourceType[] newResourceTypes = new ItemResourceType[clone.resourceTypes.length];
+                    for (int i = 0; i < clone.resourceTypes.length; i++) {
+                        newResourceTypes[i] = clone.resourceTypes[i].clone();
+                        newResourceTypes[i].quantity = 0;
+                    }
+                    clone.resourceTypes = newResourceTypes;
+                }
 
                 // Prevent virtual items from appearing in the creative inventory.
                 // categories controls which creative library tabs show the item;
