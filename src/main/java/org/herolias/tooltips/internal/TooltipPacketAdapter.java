@@ -90,6 +90,7 @@ public class TooltipPacketAdapter {
 
     private final VirtualItemRegistry virtualItemRegistry;
     private final TooltipRegistry tooltipRegistry;
+    private final GlobalTooltipManager globalTooltipManager;
 
     /** Registered outbound filter handle. */
     private PacketFilter outboundFilter;
@@ -147,9 +148,11 @@ public class TooltipPacketAdapter {
 
     public TooltipPacketAdapter(
             @Nonnull VirtualItemRegistry virtualItemRegistry,
-            @Nonnull TooltipRegistry tooltipRegistry) {
+            @Nonnull TooltipRegistry tooltipRegistry,
+            @Nonnull GlobalTooltipManager globalTooltipManager) {
         this.virtualItemRegistry = virtualItemRegistry;
         this.tooltipRegistry = tooltipRegistry;
+        this.globalTooltipManager = globalTooltipManager;
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -347,6 +350,10 @@ public class TooltipPacketAdapter {
                         translationsPacket.translations = new HashMap<>(translationsPacket.translations);
                     }
                     translationsPacket.type = UpdateType.AddOrUpdate;
+                    
+                    if (globalTooltipManager != null) {
+                        globalTooltipManager.injectIntoInitPacket(translationsPacket, playerRef.getLanguage());
+                    }
                 }
             } else if (packet instanceof Notification) {
                 // ─────────────────────────────────────────────────────────────────────
@@ -809,8 +816,9 @@ public class TooltipPacketAdapter {
                                     newVirtualItems.put(virtualId, virtualBase);
 
                                     String descKey = VirtualItemRegistry.getVirtualDescriptionKey(virtualId);
-                                    String originalDesc = virtualItemRegistry.getOriginalDescription(
-                                            baseItemId, playerRef.getLanguage());
+                                    String originalDesc = globalTooltipManager != null ?
+                                            globalTooltipManager.getGlobalDescription(baseItemId, playerRef.getLanguage()) :
+                                            virtualItemRegistry.getOriginalDescription(baseItemId, playerRef.getLanguage());
                                     String enrichedDesc = composed.buildDescription(originalDesc);
                                     translations.put(descKey, enrichedDesc);
 
@@ -991,7 +999,9 @@ public class TooltipPacketAdapter {
 
         String descKey = VirtualItemRegistry.getVirtualDescriptionKey(virtualId);
         if (!translations.containsKey(descKey)) {
-            String originalDesc = virtualItemRegistry.getOriginalDescription(stackBaseId, recipientRef.getLanguage());
+            String originalDesc = globalTooltipManager != null ?
+                    globalTooltipManager.getGlobalDescription(stackBaseId, recipientRef.getLanguage()) :
+                    virtualItemRegistry.getOriginalDescription(stackBaseId, recipientRef.getLanguage());
             String enrichedDesc = composed.buildDescription(originalDesc);
             translations.put(descKey, enrichedDesc);
             virtualItemRegistry.cacheDescription(virtualId, enrichedDesc);
@@ -1145,7 +1155,9 @@ public class TooltipPacketAdapter {
             // Build the description for this virtual item
             String descKey = VirtualItemRegistry.getVirtualDescriptionKey(virtualId);
             if (!translations.containsKey(descKey)) {
-                String originalDesc = virtualItemRegistry.getOriginalDescription(baseItemId, language);
+                String originalDesc = globalTooltipManager != null ?
+                        globalTooltipManager.getGlobalDescription(baseItemId, language) :
+                        virtualItemRegistry.getOriginalDescription(baseItemId, language);
                 String enrichedDesc = composed.buildDescription(originalDesc);
                 translations.put(descKey, enrichedDesc);
                 virtualItemRegistry.cacheDescription(virtualId, enrichedDesc);

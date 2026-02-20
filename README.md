@@ -4,6 +4,8 @@
 
 **DynamicTooltipsLib** overcomes Hytale's static tooltip limitation by transparently creating virtual item definitions. This allows two items of the same type (e.g., two Iron Swords) to display completely different descriptions, based on their metadata, NBT, or external state.
 
+> **Global Tooltips Note**: If you want to change or add lines to **all** items of the same ID (e.g. all apples), use the [Global Tooltip APIs](#global-tooltip-apis) instead. They modify vanilla translations natively without the overhead of creating per-instance virtual items.
+
 ---
 
 Why you should use this library:
@@ -17,9 +19,11 @@ I will add more features and update the library regularly.
 1. [Features](#features)
 2. [Integration](#integration)
 3. [Usage](#usage)
-4. [Advanced Topics](#advanced-topics)
-5. [Architecture](#architecture)
-6. [Performance](#performance)
+4. [API Reference](#api-reference)
+   - [Global Tooltip APIs](#global-tooltip-apis)
+5. [Advanced Topics](#advanced-topics)
+6. [Architecture](#architecture)
+7. [Performance](#performance)
 
 ---
 
@@ -167,6 +171,24 @@ public TooltipData getTooltipData(String itemId, String metadata, String locale)
 ```
 
 The library caches compositions per-locale automatically. The `locale` may be `null` in contexts where a player language is unavailable (e.g. entity updates for other players); in that case, fall back to `"en-US"`.
+
+### Global Tooltip APIs
+
+Sometimes you want to add a line or completely replace the tooltip for **all** items of a specific type (e.g. all Iron Swords), without creating virtual items. The Global APIs allow you to do exactly this using Hytale's vanilla translation updates:
+
+*   `addGlobalLine(String baseItemId, String line)`: Appends a line to the global tooltip of an item type. This is visible to all players.
+*   `replaceGlobalTooltip(String baseItemId, String... lines)`: Replaces the entire global tooltip of an item type with the given lines. This takes precedence over additive lines.
+*   `clearGlobalTooltips(String baseItemId)`: Clears all global tooltip overrides for this base item type, reverting to the original description.
+
+```java
+// Example: Add a global warning line to all apples
+DynamicTooltipsApi api = DynamicTooltipsApiProvider.get();
+if (api != null) {
+    api.addGlobalLine("Plant_Fruit_Apple", "<color is=\"#FF0000\">Wash before eating!</color>");
+}
+```
+
+> **Note:** The Global APIs modify translations via network packets and do not use virtual item IDs. They affect the base item directly and persist across player connections and language changes.
 
 ### Visual Overrides Reference
 <p align="center" width="100%">

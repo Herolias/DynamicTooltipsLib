@@ -37,6 +37,28 @@ public interface DynamicTooltipsApi {
      */
     boolean unregisterProvider(@Nonnull String providerId);
 
+    /**
+     * Appends a line to the global tooltip of an item type.
+     * This will affect all items of this type, without using virtual IDs.
+     * @param baseItemId the base item ID
+     * @param line the line to add
+     */
+    void addGlobalLine(@Nonnull String baseItemId, @Nonnull String line);
+
+    /**
+     * Replaces the global tooltip of an item type with the given lines.
+     * This will affect all items of this type, without using virtual IDs.
+     * @param baseItemId the base item ID
+     * @param lines the lines to replace the description with
+     */
+    void replaceGlobalTooltip(@Nonnull String baseItemId, @Nonnull String... lines);
+
+    /**
+     * Clears all global tooltip overrides for this base item type.
+     * @param baseItemId the base item ID
+     */
+    void clearGlobalTooltips(@Nonnull String baseItemId);
+
     // ─────────────────────────────────────────────────────────────────────
     //  Cache invalidation
     // ─────────────────────────────────────────────────────────────────────

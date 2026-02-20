@@ -13,6 +13,7 @@ import org.herolias.tooltips.api.TooltipProvider;
 import org.herolias.tooltips.internal.TooltipPacketAdapter;
 import org.herolias.tooltips.internal.TooltipRegistry;
 import org.herolias.tooltips.internal.VirtualItemRegistry;
+import org.herolias.tooltips.internal.GlobalTooltipManager;
 
 import javax.annotation.Nonnull;
 import java.util.*;
@@ -33,6 +34,7 @@ public class DynamicTooltipsLib extends JavaPlugin {
 
     private TooltipRegistry tooltipRegistry;
     private VirtualItemRegistry virtualItemRegistry;
+    private GlobalTooltipManager globalTooltipManager;
     private TooltipPacketAdapter packetAdapter;
 
 
@@ -50,7 +52,8 @@ public class DynamicTooltipsLib extends JavaPlugin {
         // Initialize core components
         this.tooltipRegistry = new TooltipRegistry();
         this.virtualItemRegistry = new VirtualItemRegistry();
-        this.packetAdapter = new TooltipPacketAdapter(virtualItemRegistry, tooltipRegistry);
+        this.globalTooltipManager = new GlobalTooltipManager(this.virtualItemRegistry);
+        this.packetAdapter = new TooltipPacketAdapter(virtualItemRegistry, tooltipRegistry, globalTooltipManager);
 
         // Register the packet adapter (outbound + inbound filters)
         this.packetAdapter.register();
@@ -58,7 +61,7 @@ public class DynamicTooltipsLib extends JavaPlugin {
 
         // Register the public API
         DynamicTooltipsApi api = new DynamicTooltipsApiImpl(
-                tooltipRegistry, virtualItemRegistry, packetAdapter);
+                tooltipRegistry, virtualItemRegistry, packetAdapter, globalTooltipManager);
         DynamicTooltipsApiProvider.register(api);
 
         // Register PlayerDisconnectEvent to clean up registry cache
@@ -85,13 +88,16 @@ public class DynamicTooltipsLib extends JavaPlugin {
         private final TooltipRegistry registry;
         private final VirtualItemRegistry virtualItemRegistry;
         private final TooltipPacketAdapter packetAdapter;
+        private final GlobalTooltipManager globalTooltipManager;
 
         DynamicTooltipsApiImpl(TooltipRegistry registry,
                                VirtualItemRegistry virtualItemRegistry,
-                               TooltipPacketAdapter packetAdapter) {
+                               TooltipPacketAdapter packetAdapter,
+                               GlobalTooltipManager globalTooltipManager) {
             this.registry = registry;
             this.virtualItemRegistry = virtualItemRegistry;
             this.packetAdapter = packetAdapter;
+            this.globalTooltipManager = globalTooltipManager;
         }
 
         @Override
@@ -102,6 +108,24 @@ public class DynamicTooltipsLib extends JavaPlugin {
         @Override
         public boolean unregisterProvider(@Nonnull String providerId) {
             return registry.unregisterProvider(providerId);
+        }
+
+        @Override
+        public void addGlobalLine(@Nonnull String baseItemId, @Nonnull String line) {
+            globalTooltipManager.addGlobalLine(baseItemId, line);
+            this.refreshAllPlayers();
+        }
+
+        @Override
+        public void replaceGlobalTooltip(@Nonnull String baseItemId, @Nonnull String... lines) {
+            globalTooltipManager.replaceGlobalTooltip(baseItemId, lines);
+            this.refreshAllPlayers();
+        }
+
+        @Override
+        public void clearGlobalTooltips(@Nonnull String baseItemId) {
+            globalTooltipManager.clearGlobalTooltips(baseItemId);
+            this.refreshAllPlayers();
         }
 
         @Override
