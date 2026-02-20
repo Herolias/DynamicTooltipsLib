@@ -288,6 +288,11 @@ public class VirtualItemRegistry {
                     }
                 }
 
+                // Null out resourceTypes on virtual items.
+                // The client will use ExtraResources to satisfy ResourceType-based recipes.
+                // If the virtual item keeps its ResourceTypes, the client double-counts!
+                clone.resourceTypes = null;
+
                 // Prevent virtual items from appearing in the creative inventory.
                 // categories controls which creative library tabs show the item;
                 // variant = true causes the client to hide it by default.

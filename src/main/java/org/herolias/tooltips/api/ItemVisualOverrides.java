@@ -198,11 +198,51 @@ public final class ItemVisualOverrides {
         if (displayEntityStatsHUD != null) sb.append("|desh:").append(Arrays.hashCode(displayEntityStatsHUD));
         if (itemEntity != null) sb.append("|ie:").append(itemEntity.hashCode());
         if (durability != null) sb.append("|dur:").append(durability);
-        if (armor != null) sb.append("|arm:").append(armor.hashCode());
-        if (weapon != null) sb.append("|wpn:").append(weapon.hashCode());
-        if (tool != null) sb.append("|tl:").append(tool.hashCode());
-        if (additionalArmorStatModifiers != null) sb.append("|aasm:").append(additionalArmorStatModifiers.hashCode());
-        if (additionalWeaponStatModifiers != null) sb.append("|awsm:").append(additionalWeaponStatModifiers.hashCode());
+        if (armor != null) sb.append("|arm:").append(deepHashItemArmor(armor));
+        if (weapon != null) sb.append("|wpn:").append(deepHashItemWeapon(weapon));
+        if (tool != null) sb.append("|tl:").append(tool.hashCode()); // ItemTool uses Arrays.hashCode correctly
+        if (additionalArmorStatModifiers != null) sb.append("|aasm:").append(deepHashModifierMap(additionalArmorStatModifiers));
+        if (additionalWeaponStatModifiers != null) sb.append("|awsm:").append(deepHashModifierMap(additionalWeaponStatModifiers));
+    }
+
+    private static int deepHashItemArmor(ItemArmor obj) {
+        if (obj == null) return 0;
+        int h = 1;
+        h = 31 * h + (obj.armorSlot != null ? obj.armorSlot.hashCode() : 0);
+        h = 31 * h + java.util.Arrays.hashCode(obj.cosmeticsToHide);
+        h = 31 * h + Double.hashCode(obj.baseDamageResistance);
+        h = 31 * h + deepHashModifierMap(obj.statModifiers);
+        h = 31 * h + deepHashModifierMapStr(obj.damageResistance);
+        h = 31 * h + deepHashModifierMapStr(obj.damageEnhancement);
+        h = 31 * h + deepHashModifierMapStr(obj.damageClassEnhancement);
+        return h;
+    }
+
+    private static int deepHashItemWeapon(ItemWeapon obj) {
+        if (obj == null) return 0;
+        int h = 1;
+        h = 31 * h + java.util.Arrays.hashCode(obj.entityStatsToClear);
+        h = 31 * h + deepHashModifierMap(obj.statModifiers);
+        h = 31 * h + Boolean.hashCode(obj.renderDualWielded);
+        return h;
+    }
+
+    private static int deepHashModifierMap(Map<Integer, Modifier[]> map) {
+        if (map == null) return 0;
+        int h = 0;
+        for (Map.Entry<Integer, Modifier[]> entry : map.entrySet()) {
+            h += (entry.getKey() != null ? entry.getKey().hashCode() : 0) ^ java.util.Arrays.hashCode(entry.getValue());
+        }
+        return h;
+    }
+
+    private static int deepHashModifierMapStr(Map<String, Modifier[]> map) {
+        if (map == null) return 0;
+        int h = 0;
+        for (Map.Entry<String, Modifier[]> entry : map.entrySet()) {
+            h += (entry.getKey() != null ? entry.getKey().hashCode() : 0) ^ java.util.Arrays.hashCode(entry.getValue());
+        }
+        return h;
     }
 
     @Nonnull

@@ -320,8 +320,10 @@ public class TooltipPacketAdapter {
                 }
             } else if (packet instanceof OpenWindow openWindow) {
                 processWindowInventory(playerRef, openWindow.inventory);
+                processCraftingWindowExtraResources(playerRef, openWindow);
             } else if (packet instanceof UpdateWindow updateWindow) {
                 processWindowInventory(playerRef, updateWindow.inventory);
+                processCraftingWindowExtraResources(playerRef, updateWindow);
             } else if (packet instanceof CustomPage customPage) {
                 processCustomPage(playerRef, customPage);
             } else if (packet instanceof UpdateTranslations translationsPacket) {
@@ -473,6 +475,86 @@ public class TooltipPacketAdapter {
 
         processSection(playerUuid, null, section, language, newVirtualItems, translations);
         sendAuxiliaryPackets(playerRef, newVirtualItems, translations);
+    }
+
+    // ───────────────────────────────────────────────────────────────────────
+    //  Crafting Workaround (Virtual Items in ExtraResources)
+    // ───────────────────────────────────────────────────────────────────────
+
+    private void processCraftingWindowExtraResources(@Nonnull PlayerRef playerRef, @Nonnull Packet packet) {
+        // Only applies to OpenWindow and UpdateWindow
+        com.hypixel.hytale.protocol.ExtraResources resources = null;
+        if (packet instanceof OpenWindow openWindow) {
+            resources = openWindow.extraResources;
+        } else if (packet instanceof UpdateWindow updateWindow) {
+            resources = updateWindow.extraResources;
+        }
+
+        UUID playerUuid = playerRef.getUuid();
+        UpdatePlayerInventory rawInv = lastRawInventory.get(playerUuid);
+        if (rawInv == null) return;
+
+        // Collect all virtual items from the player's true inventory
+        // and map their BASE IDs to the total quantity held.
+        Map<String, Integer> virtualBaseQuantities = new HashMap<>();
+
+        collectVirtualItemsForCrafting(playerUuid, rawInv.hotbar, virtualBaseQuantities);
+        collectVirtualItemsForCrafting(playerUuid, rawInv.utility, virtualBaseQuantities);
+        collectVirtualItemsForCrafting(playerUuid, rawInv.tools, virtualBaseQuantities);
+        collectVirtualItemsForCrafting(playerUuid, rawInv.armor, virtualBaseQuantities);
+        collectVirtualItemsForCrafting(playerUuid, rawInv.storage, virtualBaseQuantities);
+        collectVirtualItemsForCrafting(playerUuid, rawInv.backpack, virtualBaseQuantities);
+        collectVirtualItemsForCrafting(playerUuid, rawInv.builderMaterial, virtualBaseQuantities);
+
+        if (virtualBaseQuantities.isEmpty()) return;
+
+        // If ExtraResources is null, instantiate it
+        if (resources == null) {
+            resources = new com.hypixel.hytale.protocol.ExtraResources(new com.hypixel.hytale.protocol.ItemQuantity[0]);
+            if (packet instanceof OpenWindow openWindow) {
+                openWindow.extraResources = resources;
+            } else if (packet instanceof UpdateWindow updateWindow) {
+                updateWindow.extraResources = resources;
+            }
+        }
+
+        // Append the aggregated virtual bases to the ExtraResources array
+        List<com.hypixel.hytale.protocol.ItemQuantity> updatedResources = new ArrayList<>();
+        if (resources.resources != null) {
+            for (com.hypixel.hytale.protocol.ItemQuantity q : resources.resources) {
+                updatedResources.add(q);
+            }
+        }
+
+        for (Map.Entry<String, Integer> entry : virtualBaseQuantities.entrySet()) {
+            updatedResources.add(new com.hypixel.hytale.protocol.ItemQuantity(entry.getKey(), entry.getValue()));
+        }
+
+        resources.resources = updatedResources.toArray(new com.hypixel.hytale.protocol.ItemQuantity[0]);
+    }
+
+    private void collectVirtualItemsForCrafting(@Nonnull UUID playerUuid, @Nullable InventorySection section, @Nonnull Map<String, Integer> virtualBaseQuantities) {
+        if (section == null || section.items == null) return;
+
+        for (Map.Entry<Integer, ItemWithAllMetadata> entry : section.items.entrySet()) {
+            ItemWithAllMetadata item = entry.getValue();
+            if (item == null || item.itemId == null) continue;
+
+            // We must find out if this item is currently virtualized for the player
+            // Since this section is from lastRawInventory, it contains the TRUE base IDs.
+            // We need to check if we generated a virtual ID for it via our tracking.
+
+            // To do this reliably, we simply try to compose it.
+            // If it has a composed tooltip, then it is virtualized on the client.
+            TooltipRegistry.ComposedTooltip composed = tooltipRegistry.compose(
+                    item.itemId, item.metadata, "en"); // Language doesn't matter here, we only need the base ID
+            
+            if (composed != null) {
+                // This item IS virtualized on the client. To allow the client to use it
+                // in crafting, we must append its base ID to ExtraResources.
+                virtualBaseQuantities.merge(item.itemId, item.quantity, Integer::sum);
+            }
+        }
     }
 
     // ───────────────────────────────────────────────────────────────────────
