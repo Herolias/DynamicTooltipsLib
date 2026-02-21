@@ -68,7 +68,17 @@ public class DynamicTooltipsLib extends JavaPlugin {
         this.getEventRegistry().registerGlobal(com.hypixel.hytale.server.core.event.events.player.PlayerDisconnectEvent.class, this::onPlayerDisconnect);
         LOGGER.atInfo().log("Registered PlayerDisconnectEvent listener for cleanup");
 
+        // Register PlayerConnectEvent to push global tooltip updates to newly joined players
+        this.getEventRegistry().registerGlobal(com.hypixel.hytale.server.core.event.events.player.PlayerConnectEvent.class, this::onPlayerConnect);
+        LOGGER.atInfo().log("Registered PlayerConnectEvent listener for global tooltips");
+
         LOGGER.atInfo().log("DynamicTooltipsLib setup complete — API registered");
+    }
+
+    private void onPlayerConnect(com.hypixel.hytale.server.core.event.events.player.PlayerConnectEvent event) {
+        if (globalTooltipManager != null) {
+            globalTooltipManager.sendAllUpdates(event.getPlayerRef());
+        }
     }
 
     private void onPlayerDisconnect(com.hypixel.hytale.server.core.event.events.player.PlayerDisconnectEvent event) {

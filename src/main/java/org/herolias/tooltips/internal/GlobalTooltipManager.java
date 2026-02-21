@@ -35,7 +35,7 @@ public class GlobalTooltipManager {
      * @param line the line to add
      */
     public void addGlobalLine(@Nonnull String baseItemId, @Nonnull String line) {
-        additiveLines.computeIfAbsent(baseItemId, k -> new ArrayList<>()).add(line);
+        additiveLines.computeIfAbsent(baseItemId, k -> new java.util.concurrent.CopyOnWriteArrayList<>()).add(line);
         broadcastUpdates(Collections.singleton(baseItemId));
     }
 

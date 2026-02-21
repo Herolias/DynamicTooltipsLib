@@ -349,11 +349,16 @@ public class TooltipPacketAdapter {
                     if (translationsPacket.translations != null) {
                         translationsPacket.translations = new HashMap<>(translationsPacket.translations);
                     }
-                    translationsPacket.type = UpdateType.AddOrUpdate;
                     
                     if (globalTooltipManager != null) {
                         globalTooltipManager.injectIntoInitPacket(translationsPacket, playerRef.getLanguage());
                     }
+                    
+                    // Clear the local language cache so descriptions will be rebuilt
+                    virtualItemRegistry.clearLanguageCaches();
+                    
+                    // Trigger a deferred refresh to resend virtual item tooltips with the new language
+                    schedulePostTransitionRefresh(playerUuid);
                 }
             } else if (packet instanceof Notification) {
                 // ─────────────────────────────────────────────────────────────────────
