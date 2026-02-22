@@ -1,6 +1,7 @@
 package org.herolias.tooltips.api;
 
 import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 
 /**
  * Public API for the DynamicTooltipsLib library.
@@ -18,6 +19,28 @@ import javax.annotation.Nonnull;
  * }</pre>
  */
 public interface DynamicTooltipsApi {
+
+    /**
+     * Resolves the locale to use for a specific player when composing tooltips.
+     * <p>
+     * If a resolver returns {@code null}, the system falls back to the client's reported language.
+     */
+    @FunctionalInterface
+    interface LanguageResolver {
+        @Nullable
+        String resolveLanguage(@Nonnull java.util.UUID playerUuid);
+    }
+
+    /**
+     * Sets the global language resolver for tooltips.
+     * <p>
+     * This allows other plugins to dictate the exact locale to use for translation lookups
+     * when building tooltips for a specific player (e.g. enforcing a custom language preference
+     * instead of relying strictly on the client's system locale).
+     *
+     * @param resolver the resolver to use, or {@code null} to reset to default behavior
+     */
+    void setLanguageResolver(@Nullable LanguageResolver resolver);
 
     /**
      * Registers a tooltip provider.

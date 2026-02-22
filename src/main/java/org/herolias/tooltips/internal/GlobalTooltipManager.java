@@ -97,6 +97,8 @@ public class GlobalTooltipManager {
 
         for (String baseItemId : baseItemIds) {
             String translationKey = virtualItemRegistry.getItemDescriptionKey(baseItemId);
+            if (translationKey == null || translationKey.trim().isEmpty()) continue;
+            
             String computed = getGlobalDescription(baseItemId, locale);
             if (computed != null) {
                 translations.put(translationKey, computed);
@@ -130,6 +132,8 @@ public class GlobalTooltipManager {
         
         for (String baseItemId : allIds) {
             String key = virtualItemRegistry.getItemDescriptionKey(baseItemId);
+            if (key == null || key.trim().isEmpty()) continue;
+            
             String computed = getGlobalDescription(baseItemId, locale);
             if (computed != null) {
                 packet.translations.put(key, computed);

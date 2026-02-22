@@ -16,6 +16,7 @@ import org.herolias.tooltips.internal.VirtualItemRegistry;
 import org.herolias.tooltips.internal.GlobalTooltipManager;
 
 import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
@@ -108,6 +109,11 @@ public class DynamicTooltipsLib extends JavaPlugin {
             this.virtualItemRegistry = virtualItemRegistry;
             this.packetAdapter = packetAdapter;
             this.globalTooltipManager = globalTooltipManager;
+        }
+
+        @Override
+        public void setLanguageResolver(@Nullable LanguageResolver resolver) {
+            packetAdapter.setLanguageResolver(resolver);
         }
 
         @Override

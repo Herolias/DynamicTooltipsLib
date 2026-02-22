@@ -43,6 +43,7 @@ import com.hypixel.hytale.protocol.packets.player.SetClientId;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
+import org.herolias.tooltips.api.DynamicTooltipsApi;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
@@ -91,6 +92,8 @@ public class TooltipPacketAdapter {
     private final VirtualItemRegistry virtualItemRegistry;
     private final TooltipRegistry tooltipRegistry;
     private final GlobalTooltipManager globalTooltipManager;
+
+    private DynamicTooltipsApi.LanguageResolver languageResolver;
 
     /** Registered outbound filter handle. */
     private PacketFilter outboundFilter;
@@ -153,6 +156,10 @@ public class TooltipPacketAdapter {
         this.virtualItemRegistry = virtualItemRegistry;
         this.tooltipRegistry = tooltipRegistry;
         this.globalTooltipManager = globalTooltipManager;
+    }
+
+    public void setLanguageResolver(@Nullable DynamicTooltipsApi.LanguageResolver resolver) {
+        this.languageResolver = resolver;
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -243,6 +250,16 @@ public class TooltipPacketAdapter {
             String baseId = VirtualItemRegistry.getBaseItemId(packet.itemInHandId);
             if (baseId != null) packet.itemInHandId = baseId;
         }
+    }
+
+    private String getResolvedLanguage(@Nonnull PlayerRef playerRef) {
+        if (languageResolver != null) {
+            String overridden = languageResolver.resolveLanguage(playerRef.getUuid());
+            if (overridden != null && !overridden.isEmpty()) {
+                return overridden;
+            }
+        }
+        return playerRef.getLanguage();
     }
 
     private void translateInboundSyncInteractionChains(@Nonnull PlayerRef playerRef, @Nonnull SyncInteractionChains syncPacket) {
@@ -351,7 +368,7 @@ public class TooltipPacketAdapter {
                     }
                     
                     if (globalTooltipManager != null) {
-                        globalTooltipManager.injectIntoInitPacket(translationsPacket, playerRef.getLanguage());
+                        globalTooltipManager.injectIntoInitPacket(translationsPacket, getResolvedLanguage(playerRef));
                     }
                     
                     // Clear the local language cache so descriptions will be rebuilt
@@ -448,7 +465,7 @@ public class TooltipPacketAdapter {
     private void processPlayerInventory(@Nonnull PlayerRef playerRef,
                                         @Nonnull UpdatePlayerInventory packet) {
         UUID playerUuid = playerRef.getUuid();
-        String language = playerRef.getLanguage();
+        String language = getResolvedLanguage(playerRef);
 
         Map<String, ItemBase> newVirtualItems = new LinkedHashMap<>();
         Map<String, String> translations = new LinkedHashMap<>();
@@ -480,7 +497,7 @@ public class TooltipPacketAdapter {
         if (section == null) return;
 
         UUID playerUuid = playerRef.getUuid();
-        String language = playerRef.getLanguage();
+        String language = getResolvedLanguage(playerRef);
 
         Map<String, ItemBase> newVirtualItems = new LinkedHashMap<>();
         Map<String, String> translations = new LinkedHashMap<>();
@@ -582,7 +599,7 @@ public class TooltipPacketAdapter {
         if (customPage.commands == null || customPage.commands.length == 0) return;
 
         UUID playerUuid = playerRef.getUuid();
-        String language = playerRef.getLanguage();
+        String language = getResolvedLanguage(playerRef);
 
         Map<String, ItemBase> newVirtualItems = new LinkedHashMap<>();
         Map<String, String> translations = new LinkedHashMap<>();
@@ -796,7 +813,7 @@ public class TooltipPacketAdapter {
 
                         if (baseItemId != null) {
                             TooltipRegistry.ComposedTooltip composed = tooltipRegistry.compose(
-                                    baseItemId, itemUpdate.item.metadata, playerRef.getLanguage());
+                                    baseItemId, itemUpdate.item.metadata, getResolvedLanguage(playerRef));
                             if (composed != null && composed.getVisualOverrides() != null
                                     && !composed.getVisualOverrides().isEmpty()) {
 

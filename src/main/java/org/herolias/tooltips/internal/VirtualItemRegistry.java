@@ -552,7 +552,10 @@ public class VirtualItemRegistry {
             try {
                 Item item = Item.getAssetMap().getAsset(id);
                 if (item != null) {
-                    return item.getDescriptionTranslationKey();
+                    String key = item.getDescriptionTranslationKey();
+                    if (key != null && !key.trim().isEmpty()) {
+                        return key;
+                    }
                 }
             } catch (Exception e) {
                 LOGGER.atFine().log("Could not resolve description key for " + id + ": " + e.getMessage());
