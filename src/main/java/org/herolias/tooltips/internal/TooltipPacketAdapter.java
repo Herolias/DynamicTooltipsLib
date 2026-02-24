@@ -100,6 +100,9 @@ public class TooltipPacketAdapter {
     /** Registered inbound filter handle. */
     private PacketFilter inboundFilter;
 
+    private java.lang.reflect.Field outboundHandlersField;
+    private boolean reflectionFailed = false;
+
     /**
      * Re-entrancy guard. Set to {@code true} while the outbound filter is
      * processing a packet and sending auxiliary packets via {@code writeNoCache()}.
@@ -149,6 +152,15 @@ public class TooltipPacketAdapter {
      */
     private final ConcurrentHashMap<UUID, Integer> playerActiveHotbarSlots = new ConcurrentHashMap<>();
 
+    /**
+     * Per-player cache of the last fully-processed {@link com.hypixel.hytale.protocol.ExtraResources}
+     * (server chest items + DTL virtual items) from OpenWindow / UpdateWindow packets.
+     * When the server sends a subsequent {@code null} ExtraResources ("no change"),
+     * this cached result is replayed verbatim so virtual items remain visible for crafting
+     * without losing the chest data.
+     */
+    private final ConcurrentHashMap<UUID, com.hypixel.hytale.protocol.ExtraResources> lastServerExtraResources = new ConcurrentHashMap<>();
+
     public TooltipPacketAdapter(
             @Nonnull VirtualItemRegistry virtualItemRegistry,
             @Nonnull TooltipRegistry tooltipRegistry,
@@ -195,6 +207,7 @@ public class TooltipPacketAdapter {
         knownPlayerRefs.remove(playerUuid);
         playerEntityIds.remove(playerUuid);
         playerActiveHotbarSlots.remove(playerUuid);
+        lastServerExtraResources.remove(playerUuid);
         
         // Critical Fix: Clear virtual item registry cache for this player so that
         // on rejoin, all item definitions are resent fresh.
@@ -296,12 +309,42 @@ public class TooltipPacketAdapter {
         }
     }
 
+    /**
+     * Dynamically ensures that our outbound filter executes last in the chain.
+     * This fixes compatibility issues with other mods (like Simple Claims) that
+     * intercept OpenWindow/UpdateWindow packets and recalculate/overwrite ExtraResources.
+     */
+    private void ensureLastInOutbound() {
+        if (reflectionFailed || outboundFilter == null) return;
+        try {
+            if (outboundHandlersField == null) {
+                outboundHandlersField = PacketAdapters.class.getDeclaredField("outboundHandlers");
+                outboundHandlersField.setAccessible(true);
+            }
+            @SuppressWarnings("unchecked")
+            List<PacketFilter> handlers = (List<PacketFilter>) outboundHandlersField.get(null);
+            
+            if (handlers != null && !handlers.isEmpty()) {
+                if (handlers.get(handlers.size() - 1) != outboundFilter) {
+                    handlers.remove(outboundFilter);
+                    handlers.add(outboundFilter);
+                    LOGGER.atFine().log("Moved TooltipPacketAdapter to the end of outbound handlers");
+                }
+            }
+        } catch (Exception e) {
+            reflectionFailed = true;
+            LOGGER.atWarning().log("Failed to inspect/reorder packet adapters: " + e.getMessage());
+        }
+    }
+
     // ═══════════════════════════════════════════════════════════════════════
     //  OUTBOUND filter  (server → client)
     // ═══════════════════════════════════════════════════════════════════════
 
     private boolean onOutboundPacket(@Nonnull PlayerRef playerRef, @Nonnull Packet packet) {
         if (isProcessing.get()) return false;
+
+        ensureLastInOutbound();
 
         isProcessing.set(true);
         try {
@@ -537,28 +580,61 @@ public class TooltipPacketAdapter {
 
         if (virtualBaseQuantities.isEmpty()) return;
 
-        // If ExtraResources is null, instantiate it
+        // ── Null ExtraResources handling ──
+        // When the server sends null ExtraResources (= "no change"), the client
+        // may still re-evaluate available resources. We must replay the last
+        // FULLY PROCESSED result (server chest items + virtual items) so the
+        // client continues to see all materials.
         if (resources == null) {
-            resources = new com.hypixel.hytale.protocol.ExtraResources(new com.hypixel.hytale.protocol.ItemQuantity[0]);
-            if (packet instanceof OpenWindow openWindow) {
-                openWindow.extraResources = resources;
-            } else if (packet instanceof UpdateWindow updateWindow) {
-                updateWindow.extraResources = resources;
+            com.hypixel.hytale.protocol.ExtraResources cached = lastServerExtraResources.get(playerUuid);
+            if (cached != null) {
+                // Replay the exact same ExtraResources the client last received
+                com.hypixel.hytale.protocol.ExtraResources replay = cached.clone();
+                if (packet instanceof OpenWindow openWindow) {
+                    openWindow.extraResources = replay;
+                } else if (packet instanceof UpdateWindow updateWindow) {
+                    updateWindow.extraResources = replay;
+                }
+            } else {
+                // No cached data yet — create empty + append virtual items (original behavior)
+                resources = new com.hypixel.hytale.protocol.ExtraResources(new com.hypixel.hytale.protocol.ItemQuantity[0]);
+                if (packet instanceof OpenWindow openWindow) {
+                    openWindow.extraResources = resources;
+                } else if (packet instanceof UpdateWindow updateWindow) {
+                    updateWindow.extraResources = resources;
+                }
+                // Fall through to append virtual items below
+                appendVirtualItemsToResources(resources, virtualBaseQuantities);
+                // Cache this result for future replays
+                lastServerExtraResources.put(playerUuid, resources.clone());
             }
+            return;
         }
 
-        // Append the aggregated virtual bases to the ExtraResources array
+        // ── Non-null ExtraResources (server provided chest items) ──
+        // Append virtual item base IDs, then cache the final result.
+        appendVirtualItemsToResources(resources, virtualBaseQuantities);
+
+        // Cache the fully-processed ExtraResources (chest items + virtual items)
+        // so it can be replayed verbatim when the server sends null.
+        lastServerExtraResources.put(playerUuid, resources.clone());
+    }
+
+    /**
+     * Appends virtual item base quantities to the given ExtraResources.
+     */
+    private void appendVirtualItemsToResources(
+            @Nonnull com.hypixel.hytale.protocol.ExtraResources resources,
+            @Nonnull Map<String, Integer> virtualBaseQuantities) {
         List<com.hypixel.hytale.protocol.ItemQuantity> updatedResources = new ArrayList<>();
         if (resources.resources != null) {
             for (com.hypixel.hytale.protocol.ItemQuantity q : resources.resources) {
                 updatedResources.add(q);
             }
         }
-
         for (Map.Entry<String, Integer> entry : virtualBaseQuantities.entrySet()) {
             updatedResources.add(new com.hypixel.hytale.protocol.ItemQuantity(entry.getKey(), entry.getValue()));
         }
-
         resources.resources = updatedResources.toArray(new com.hypixel.hytale.protocol.ItemQuantity[0]);
     }
 

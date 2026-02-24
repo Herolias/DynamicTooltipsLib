@@ -20,6 +20,7 @@ import javax.annotation.Nullable;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import com.al3x.HStats;
 
 /**
  * DynamicTooltipsLib — a library mod that enables other mods to add
@@ -49,7 +50,7 @@ public class DynamicTooltipsLib extends JavaPlugin {
     @Override
     protected void setup() {
         LOGGER.atInfo().log("Setting up DynamicTooltipsLib...");
-
+        new HStats("c56672e5-68b9-4694-a82f-660da528f9a5", this.getManifest().getVersion().toString());
         // Initialize core components
         this.tooltipRegistry = new TooltipRegistry();
         this.virtualItemRegistry = new VirtualItemRegistry();
