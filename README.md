@@ -46,7 +46,7 @@ Add the library to your `build.gradle` as `compileOnly`. You do not need to shad
 
 ```gradle
 dependencies {
-    compileOnly files("libs/DynamicTooltipsLib-1.0.0.jar")
+    compileOnly files("libs/DynamicTooltipsLib-1.5.0.jar")
 }
 ```
 
@@ -58,7 +58,7 @@ Add it to your `manifest.json`.
 {
   "Name": "MyMod",
   "Dependencies": {
-    "org.herolias.DynamicTooltipsLib": "1.0.0"
+    "org.herolias:DynamicTooltipsLib": "1.5.0"
   }
 }
 ```
@@ -68,7 +68,7 @@ Add it to your `manifest.json`.
 {
   "Name": "MyMod",
   "OptionalDependencies": {
-    "org.herolias.DynamicTooltipsLib": "*"
+    "org.herolias5DynamicTooltipsLib": "*"
   }
 }
 ```
@@ -191,6 +191,7 @@ if (api != null) {
 > **Note:** The Global APIs modify translations via network packets and do not use virtual item IDs. They affect the base item directly and persist across player connections and language changes.
 
 ### Visual Overrides Reference
+Known limitations: not all visual overrides work completly yet. Most supported are Icon, Texture, Model and Rarity change. Some overrides only work on some Items. I will widen the compatibility in the future, for now it's a bit of trial and error.
 <p align="center" width="100%">
 <video src="https://private-user-images.githubusercontent.com/61795333/550015815-91694572-038d-4cef-8438-abaa54efe1c5.mp4?jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbSIsImtleSI6ImtleTUiLCJleHAiOjE3NzExMTYwMTksIm5iZiI6MTc3MTExNTcxOSwicGF0aCI6Ii82MTc5NTMzMy81NTAwMTU4MTUtOTE2OTQ1NzItMDM4ZC00Y2VmLTg0MzgtYWJhYTU0ZWZlMWM1Lm1wND9YLUFtei1BbGdvcml0aG09QVdTNC1ITUFDLVNIQTI1NiZYLUFtei1DcmVkZW50aWFsPUFLSUFWQ09EWUxTQTUzUFFLNFpBJTJGMjAyNjAyMTUlMkZ1cy1lYXN0LTElMkZzMyUyRmF3czRfcmVxdWVzdCZYLUFtei1EYXRlPTIwMjYwMjE1VDAwMzUxOVomWC1BbXotRXhwaXJlcz0zMDAmWC1BbXotU2lnbmF0dXJlPWQxMmViZWNhYTZlNmRiNWY5YzBlZDVlYmI3Y2FmMzcyYTU0NmIwYjllMWI5MTZkZjFlMDg0NjM2MzE4NzRlZjQmWC1BbXotU2lnbmVkSGVhZGVycz1ob3N0In0.hlRZJqNFqjn1dhpVHwVuS518Jou4iNWskaeALIa3nn0" width="80%" controls></video>
 </p>
