@@ -751,17 +751,67 @@ public class TooltipPacketAdapter {
         if (itemStackValue == null || !itemStackValue.isDocument()) return false;
 
         BsonDocument itemStackDoc = itemStackValue.asDocument();
-        BsonValue itemIdValue = itemStackDoc.get("ItemId");
-        if (itemIdValue == null || !itemIdValue.isString()) return false;
+        String idKey = "Id";
+        BsonValue itemIdValue = itemStackDoc.get(idKey);
+        
+        if (itemIdValue == null || !itemIdValue.isString()) {
+            idKey = "ItemId";
+            itemIdValue = itemStackDoc.get(idKey);
+            if (itemIdValue == null || !itemIdValue.isString()) return false;
+        }
 
         String itemId = itemIdValue.asString().getValue();
-        if (VirtualItemRegistry.isVirtualId(itemId)) return false;
+        if (VirtualItemRegistry.isVirtualId(itemId)) {
+             // Still need to remove metadata even if already virtual, to prevent client crash
+             itemStackDoc.remove("Metadata");
+             return false;
+        }
 
-        String virtualId = findVirtualIdForItem(playerUuid, itemId, language,
-                newVirtualItems, translations);
+        String virtualId = null;
+
+        BsonValue metadataValue = itemStackDoc.get("Metadata");
+        String metadataStr = null;
+        if (metadataValue != null && metadataValue.isDocument()) {
+            metadataStr = metadataValue.asDocument().toJson();
+        }
+
+        TooltipRegistry.ComposedTooltip composed = tooltipRegistry.compose(itemId, metadataStr, language);
+        if (composed != null) {
+            virtualId = VirtualItemRegistry.generateVirtualId(itemId, composed.getCombinedHash());
+            ItemBase virtualBase = virtualItemRegistry.getOrCreateVirtualItemBase(
+                    itemId, virtualId, composed.getNameOverride(), composed.getVisualOverrides(),
+                    composed.getNameTranslationKey(), composed.getDescriptionTranslationKey()
+            );
+
+            if (virtualBase != null) {
+                newVirtualItems.put(virtualId, virtualBase);
+
+                String descKey = VirtualItemRegistry.getVirtualDescriptionKey(virtualId);
+                if (!translations.containsKey(descKey)) {
+                    String originalDesc = globalTooltipManager != null ?
+                            globalTooltipManager.getGlobalDescription(itemId, language) :
+                            virtualItemRegistry.getOriginalDescription(itemId, language);
+                    String enrichedDesc = composed.buildDescription(originalDesc);
+                    translations.put(descKey, enrichedDesc);
+                    virtualItemRegistry.cacheDescription(virtualId, enrichedDesc);
+                }
+
+                if (composed.getNameOverride() != null) {
+                    String nameKey = VirtualItemRegistry.getVirtualNameKey(virtualId);
+                    translations.put(nameKey, composed.getNameOverride());
+                }
+            }
+        }
+        // If composed is null, the item has no custom tooltip data.
+        // Do NOT fall back to findVirtualIdForItem() — that would incorrectly
+        // inherit virtual IDs (and their tooltips/visual overrides) from other
+        // items of the same base type in the player's inventory.
+
+        // Always remove Metadata from Custom UI items to prevent ItemGridSlot ArrayCodec client crash
+        itemStackDoc.remove("Metadata");
 
         if (virtualId != null) {
-            itemStackDoc.put("ItemId", new org.bson.BsonString(virtualId));
+            itemStackDoc.put(idKey, new org.bson.BsonString(virtualId));
             return true;
         }
 
