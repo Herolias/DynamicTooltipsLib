@@ -42,7 +42,23 @@ I will add more features and update the library regularly.
 See [TooltipExample](https://github.com/Herolias/TooltipExample) for an example implementation, including a `/morph` command that demonstrates visual overrides.
 
 ### 1. Gradle Dependency
-Add the library to your `build.gradle` as `compileOnly`. You do not need to shade/bundle it; the server will load it.
+
+#### Option A: CurseMaven (Recommended)
+Add the repository and dependency to your `build.gradle` as `compileOnly`. You do not need to shade/bundle it; the server will load it.
+
+```gradle
+repositories {
+    maven { url "https://cursemaven.com" }
+}
+
+dependencies {
+    compileOnly "curse.maven:dynamictooltipslib-1459711:<fileid>"
+}
+```
+*Replace `<fileid>` with the File ID found at the end of the file's CurseForge URL.*
+
+#### Option B: Local JAR
+Alternatively, download the JAR and add it locally:
 
 ```gradle
 dependencies {
