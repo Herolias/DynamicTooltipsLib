@@ -22,8 +22,8 @@ public class GlobalTooltipManager {
     private final VirtualItemRegistry virtualItemRegistry;
 
     // Track additive and replace lines separately. Replace takes precedence over additive.
-    private final Map<String, List<String>> additiveLines = new ConcurrentHashMap<>();
-    private final Map<String, List<String>> replacedLines = new ConcurrentHashMap<>();
+    private final Map<String, List<GlobalTooltipLine>> additiveLines = new ConcurrentHashMap<>();
+    private final Map<String, List<GlobalTooltipLine>> replacedLines = new ConcurrentHashMap<>();
 
     public GlobalTooltipManager(@Nonnull VirtualItemRegistry virtualItemRegistry) {
         this.virtualItemRegistry = virtualItemRegistry;
@@ -35,7 +35,17 @@ public class GlobalTooltipManager {
      * @param line the line to add
      */
     public void addGlobalLine(@Nonnull String baseItemId, @Nonnull String line) {
-        additiveLines.computeIfAbsent(baseItemId, k -> new java.util.concurrent.CopyOnWriteArrayList<>()).add(line);
+        additiveLines.computeIfAbsent(baseItemId, k -> new java.util.concurrent.CopyOnWriteArrayList<>()).add(new GlobalTooltipLine(line, false));
+        broadcastUpdates(Collections.singleton(baseItemId));
+    }
+
+    /**
+     * Appends a translation key line to the global tooltip of an item type.
+     * @param baseItemId the base item ID
+     * @param translationKey the key to add
+     */
+    public void addGlobalTranslationLine(@Nonnull String baseItemId, @Nonnull String translationKey) {
+        additiveLines.computeIfAbsent(baseItemId, k -> new java.util.concurrent.CopyOnWriteArrayList<>()).add(new GlobalTooltipLine(translationKey, true));
         broadcastUpdates(Collections.singleton(baseItemId));
     }
 
@@ -45,7 +55,21 @@ public class GlobalTooltipManager {
      * @param lines the lines to replace the description with
      */
     public void replaceGlobalTooltip(@Nonnull String baseItemId, @Nonnull String[] lines) {
-        replacedLines.put(baseItemId, Arrays.asList(lines));
+        List<GlobalTooltipLine> mapped = new ArrayList<>();
+        for (String line : lines) mapped.add(new GlobalTooltipLine(line, false));
+        replacedLines.put(baseItemId, mapped);
+        broadcastUpdates(Collections.singleton(baseItemId));
+    }
+
+    /**
+     * Replaces the global tooltip of an item type with the given translation keys.
+     * @param baseItemId the base item ID
+     * @param translationKeys the keys to replace the description with
+     */
+    public void replaceGlobalTranslationTooltip(@Nonnull String baseItemId, @Nonnull String[] translationKeys) {
+        List<GlobalTooltipLine> mapped = new ArrayList<>();
+        for (String key : translationKeys) mapped.add(new GlobalTooltipLine(key, true));
+        replacedLines.put(baseItemId, mapped);
         broadcastUpdates(Collections.singleton(baseItemId));
     }
 
@@ -134,11 +158,58 @@ public class GlobalTooltipManager {
             String key = virtualItemRegistry.getItemDescriptionKey(baseItemId);
             if (key == null || key.trim().isEmpty()) continue;
             
-            String computed = getGlobalDescription(baseItemId, locale);
+            String computed = getGlobalDescriptionFromMap(baseItemId, packet.translations, locale);
             if (computed != null) {
                 packet.translations.put(key, computed);
             }
         }
+    }
+
+    private String getGlobalDescriptionFromMap(String baseItemId, Map<String, String> translationsMap, String fallbackLocale) {
+        List<GlobalTooltipLine> replace = replacedLines.get(baseItemId);
+        if (replace != null) {
+            return String.join("\n", resolveLinesFromMap(replace, translationsMap, fallbackLocale));
+        }
+        
+        List<GlobalTooltipLine> add = additiveLines.get(baseItemId);
+        if (add != null && !add.isEmpty()) {
+            String descKey = virtualItemRegistry.getItemDescriptionKey(baseItemId);
+            String original = translationsMap.get(descKey);
+            if (original == null) {
+                original = virtualItemRegistry.getOriginalDescription(baseItemId, fallbackLocale);
+            }
+            
+            StringBuilder sb = new StringBuilder();
+            if (original != null && !original.isEmpty()) {
+                sb.append(original);
+                sb.append("\n\n");
+            }
+            sb.append(String.join("\n", resolveLinesFromMap(add, translationsMap, fallbackLocale)));
+            return sb.toString();
+        }
+        
+        return null;
+    }
+
+    private List<String> resolveLinesFromMap(List<GlobalTooltipLine> lines, Map<String, String> translationsMap, String fallbackLocale) {
+        List<String> resolved = new ArrayList<>();
+        com.hypixel.hytale.server.core.modules.i18n.I18nModule i18n = null;
+        try {
+            i18n = com.hypixel.hytale.server.core.modules.i18n.I18nModule.get();
+        } catch (Exception ignored) {}
+        
+        for (GlobalTooltipLine line : lines) {
+            if (line.isTranslationKey) {
+                String msg = translationsMap.get(line.text);
+                if (msg == null && i18n != null) {
+                    msg = i18n.getMessage(fallbackLocale, line.text);
+                }
+                resolved.add(msg != null ? msg : line.text);
+            } else {
+                resolved.add(line.text);
+            }
+        }
+        return resolved;
     }
 
     /**
@@ -147,12 +218,12 @@ public class GlobalTooltipManager {
     @Nullable
     public String getGlobalDescription(@Nonnull String baseItemId, @Nonnull String locale) {
         // Replace overrides completely overwrite everything else
-        List<String> replace = replacedLines.get(baseItemId);
+        List<GlobalTooltipLine> replace = replacedLines.get(baseItemId);
         if (replace != null) {
-            return String.join("\n", replace);
+            return String.join("\n", resolveLines(replace, locale));
         }
         
-        List<String> add = additiveLines.get(baseItemId);
+        List<GlobalTooltipLine> add = additiveLines.get(baseItemId);
         if (add != null && !add.isEmpty()) {
             String original = virtualItemRegistry.getOriginalDescription(baseItemId, locale);
             StringBuilder sb = new StringBuilder();
@@ -161,11 +232,29 @@ public class GlobalTooltipManager {
                 sb.append(original);
                 sb.append("\n\n");
             }
-            sb.append(String.join("\n", add));
+            sb.append(String.join("\n", resolveLines(add, locale)));
             return sb.toString();
         }
         
         // If there's neither replace nor add (e.g. cleared), return the original text directly.
         return virtualItemRegistry.getOriginalDescription(baseItemId, locale);
+    }
+
+    private List<String> resolveLines(List<GlobalTooltipLine> lines, String locale) {
+        List<String> resolved = new ArrayList<>();
+        com.hypixel.hytale.server.core.modules.i18n.I18nModule i18n = null;
+        try {
+            i18n = com.hypixel.hytale.server.core.modules.i18n.I18nModule.get();
+        } catch (Exception ignored) {}
+        
+        for (GlobalTooltipLine line : lines) {
+            if (line.isTranslationKey && i18n != null) {
+                String msg = i18n.getMessage(locale, line.text);
+                resolved.add(msg != null ? msg : line.text);
+            } else {
+                resolved.add(line.text);
+            }
+        }
+        return resolved;
     }
 }

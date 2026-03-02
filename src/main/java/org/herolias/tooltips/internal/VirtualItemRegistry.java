@@ -464,31 +464,6 @@ public class VirtualItemRegistry {
         return slotMap != null ? slotMap.get(slotKey) : null;
     }
 
-    /**
-     * Searches all tracked slots for a player to find a virtual ID whose base item ID
-     * matches the given real item ID.
-     */
-    @Nullable
-    public String findVirtualIdForBaseItem(@Nonnull UUID playerUuid, @Nonnull String realItemId) {
-        Map<String, String> slotMap = playerSlotVirtualIds.get(playerUuid);
-        if (slotMap == null || slotMap.isEmpty()) return null;
-
-        // First pass: check hotbar slots
-        for (Map.Entry<String, String> entry : slotMap.entrySet()) {
-            if (entry.getKey().startsWith("hotbar:")) {
-                String baseId = getBaseItemId(entry.getValue());
-                if (realItemId.equals(baseId)) return entry.getValue();
-            }
-        }
-
-        // Second pass: any slot
-        for (Map.Entry<String, String> entry : slotMap.entrySet()) {
-            String baseId = getBaseItemId(entry.getValue());
-            if (realItemId.equals(baseId)) return entry.getValue();
-        }
-
-        return null;
-    }
 
 
 
@@ -572,13 +547,15 @@ public class VirtualItemRegistry {
      * Gets a cached built description, or caches the given one.
      */
     @Nonnull
-    public String cacheDescription(@Nonnull String virtualId, @Nonnull String description) {
-        return builtDescriptionCache.computeIfAbsent(virtualId, k -> description);
+    public String cacheDescription(@Nonnull String virtualId, @Nullable String language, @Nonnull String description) {
+        String cacheKey = (language != null ? language : "_default") + ":" + virtualId;
+        return builtDescriptionCache.computeIfAbsent(cacheKey, k -> description);
     }
 
     @Nullable
-    public String getCachedDescription(@Nonnull String virtualId) {
-        return builtDescriptionCache.get(virtualId);
+    public String getCachedDescription(@Nonnull String virtualId, @Nullable String language) {
+        String cacheKey = (language != null ? language : "_default") + ":" + virtualId;
+        return builtDescriptionCache.get(cacheKey);
     }
 
     // ─────────────────────────────────────────────────────────────────────

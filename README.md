@@ -188,12 +188,30 @@ public TooltipData getTooltipData(String itemId, String metadata, String locale)
 
 The library caches compositions per-locale automatically. The `locale` may be `null` in contexts where a player language is unavailable (e.g. entity updates for other players); in that case, fall back to `"en-US"`.
 
+### Language Resolver
+
+Occasionally, you may want to override a player's perceived language instead of relying solely on what their client reports. You can supply a custom language resolver:
+
+```java
+DynamicTooltipsApi api = DynamicTooltipsApiProvider.get();
+if (api != null) {
+    api.setLanguageResolver(playerUuid -> {
+        // e.g. look up the player's language preference from a database
+        return myCustomLanguageDB.getLanguage(playerUuid); 
+    });
+}
+```
+
+If your resolver returns `null` for a player (or no resolver is set), the library seamlessly falls back to the client's reported language.
+
 ### Global Tooltip APIs
 
 Sometimes you want to add a line or completely replace the tooltip for **all** items of a specific type (e.g. all Iron Swords), without creating virtual items. The Global APIs allow you to do exactly this using Hytale's vanilla translation updates:
 
 *   `addGlobalLine(String baseItemId, String line)`: Appends a line to the global tooltip of an item type. This is visible to all players.
+*   `addGlobalTranslationLine(String baseItemId, String translationKey)`: Appends a translation key to the global tooltip of an item type. This will be localized per player when computing the tooltip.
 *   `replaceGlobalTooltip(String baseItemId, String... lines)`: Replaces the entire global tooltip of an item type with the given lines. This takes precedence over additive lines.
+*   `replaceGlobalTranslationTooltip(String baseItemId, String... translationKeys)`: Replaces the entire global tooltip of an item type with the given translation keys. This will be localized per player when computing the tooltip.
 *   `clearGlobalTooltips(String baseItemId)`: Clears all global tooltip overrides for this base item type, reverting to the original description.
 
 ```java
@@ -205,6 +223,31 @@ if (api != null) {
 ```
 
 > **Note:** The Global APIs modify translations via network packets and do not use virtual item IDs. They affect the base item directly and persist across player connections and language changes.
+
+### Custom UI Support
+
+DynamicTooltipsLib automatically intercepts and applies visual overrides and dynamic tooltips to your custom UI documents (`.ui` files), provided your UI is structured correctly. 
+
+To ensure your custom UI items support dynamic tooltips:
+1. Use an **`ItemGrid`** widget in your `.ui` file rather than an `ItemSlot`.
+2. Wrap your items in an **`ItemGridSlot`** that contains the full `ItemStack` (which includes both the item `Id` and `Metadata`).
+3. Assign this array of slots to the `.Slots` property of your `ItemGrid` widget using a `UICommandBuilder`.
+
+**Example `.ui` file:**
+```ui
+ItemGrid #MyItemIcon {
+  SlotsPerRow: 1;
+}
+```
+
+**Example Java Implementation:**
+```java
+ItemStack stack = item.toItemStack();
+Object[] slotArray = new ItemGridSlot[]{ new ItemGridSlot(stack) };
+commandBuilder.set("#MyItemIcon.Slots", slotArray);
+```
+
+The library will automatically intercept the outbound `CustomPage` packet, compute the tooltips, swap the real ID for a virtual ID, and safely strip the metadata before the client processes it (preventing `ItemGridSlot` ArrayCodec crashes).
 
 ### Visual Overrides Reference
 Known limitations: not all visual overrides work completly yet. Most supported are Icon, Texture, Model and Rarity change. Some overrides only work on some Items. I will widen the compatibility in the future, for now it's a bit of trial and error.
@@ -340,11 +383,24 @@ When multiple mods add tooltips to the same item, they are stacked based on prio
 | `DEFAULT` | 100 | Standard stats, enchantments. |
 | `LAST` | 200 | Footer information, debug info. |
 
-### Force Refreshing
-If you change a config value (e.g. changed a damage value), you need to force a refresh so players see the change immediately.
+### Cache Invalidation & Force Refreshing
+When you modify external data that dictates what a tooltip should look like (e.g. updating a player's stat configuration, modifying item stats config), you need to notify the library so that players see the changes immediately without waiting for the next natural inventory interaction.
 
 ```java
-DynamicTooltipsApiProvider.get().refreshAllPlayers();
+DynamicTooltipsApi api = DynamicTooltipsApiProvider.get();
+
+// Invalidates and immediately resends tooltips for a specific player:
+// Use when player-specific data changes that only affects their view.
+api.refreshPlayer(playerUuid);
+
+// Invalidates and immediately resends tooltips for ALL online players:
+// Use after changing a global configuration or provider logic.
+api.refreshAllPlayers();
+
+// Invalidate caches without instantly force-sending packets.
+// Use if you changed data but don't need players to see it *until* their client requests an inventory update.
+api.invalidatePlayer(playerUuid);
+api.invalidateAll();
 ```
 
 ---

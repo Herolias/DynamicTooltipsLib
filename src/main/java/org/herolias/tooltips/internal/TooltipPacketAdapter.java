@@ -15,6 +15,8 @@ import com.hypixel.hytale.protocol.packets.player.JoinWorld;
 import com.hypixel.hytale.protocol.packets.player.MouseInteraction;
 import com.hypixel.hytale.protocol.packets.window.OpenWindow;
 import com.hypixel.hytale.protocol.packets.window.UpdateWindow;
+import com.hypixel.hytale.protocol.packets.window.SendWindowAction;
+import com.hypixel.hytale.protocol.packets.window.CraftRecipeAction;
 import com.hypixel.hytale.protocol.packets.inventory.SetActiveSlot;
 import com.hypixel.hytale.protocol.packets.interface_.CustomPage;
 import com.hypixel.hytale.protocol.packets.interface_.CustomUICommand;
@@ -160,6 +162,7 @@ public class TooltipPacketAdapter {
      * without losing the chest data.
      */
     private final ConcurrentHashMap<UUID, com.hypixel.hytale.protocol.ExtraResources> lastServerExtraResources = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<UUID, Integer> lastServerExtraResourcesWindowId = new ConcurrentHashMap<>();
 
     public TooltipPacketAdapter(
             @Nonnull VirtualItemRegistry virtualItemRegistry,
@@ -208,6 +211,7 @@ public class TooltipPacketAdapter {
         playerEntityIds.remove(playerUuid);
         playerActiveHotbarSlots.remove(playerUuid);
         lastServerExtraResources.remove(playerUuid);
+        lastServerExtraResourcesWindowId.remove(playerUuid);
         
         // Critical Fix: Clear virtual item registry cache for this player so that
         // on rejoin, all item definitions are resent fresh.
@@ -245,6 +249,8 @@ public class TooltipPacketAdapter {
                 translateMouseInteraction(mousePacket);
             } else if (packet instanceof SyncInteractionChains syncPacket) {
                 translateInboundSyncInteractionChains(playerRef, syncPacket);
+            } else if (packet instanceof SendWindowAction windowAction) {
+                translateSendWindowAction(playerRef, windowAction);
             } else if (packet instanceof SetActiveSlot setSlot) {
                 // Track hotbar slot changes only (Inventory.HOTBAR_SECTION_ID = -1).
                 if (setSlot.inventorySectionId == -1) {
@@ -262,6 +268,17 @@ public class TooltipPacketAdapter {
         if (packet.itemInHandId != null && VirtualItemRegistry.isVirtualId(packet.itemInHandId)) {
             String baseId = VirtualItemRegistry.getBaseItemId(packet.itemInHandId);
             if (baseId != null) packet.itemInHandId = baseId;
+        }
+    }
+
+    private void translateSendWindowAction(@Nonnull PlayerRef playerRef, @Nonnull SendWindowAction packet) {
+        if (packet.action instanceof CraftRecipeAction craftAction) {
+            if (craftAction.recipeId != null && VirtualItemRegistry.isVirtualId(craftAction.recipeId)) {
+                String baseId = VirtualItemRegistry.getBaseItemId(craftAction.recipeId);
+                if (baseId != null) {
+                    craftAction.recipeId = baseId;
+                }
+            }
         }
     }
 
@@ -418,6 +435,7 @@ public class TooltipPacketAdapter {
                     virtualItemRegistry.clearLanguageCaches();
                     
                     // Trigger a deferred refresh to resend virtual item tooltips with the new language
+                    invalidatePlayer(playerUuid);
                     schedulePostTransitionRefresh(playerUuid);
                 }
             } else if (packet instanceof Notification) {
@@ -586,38 +604,52 @@ public class TooltipPacketAdapter {
         // FULLY PROCESSED result (server chest items + virtual items) so the
         // client continues to see all materials.
         if (resources == null) {
-            com.hypixel.hytale.protocol.ExtraResources cached = lastServerExtraResources.get(playerUuid);
-            if (cached != null) {
-                // Replay the exact same ExtraResources the client last received
-                com.hypixel.hytale.protocol.ExtraResources replay = cached.clone();
-                if (packet instanceof OpenWindow openWindow) {
-                    openWindow.extraResources = replay;
-                } else if (packet instanceof UpdateWindow updateWindow) {
-                    updateWindow.extraResources = replay;
-                }
-            } else {
-                // No cached data yet — create empty + append virtual items (original behavior)
+            if (packet instanceof OpenWindow openWindow) {
+                // For a new OpenWindow with null ExtraResources (like Pocket Crafting),
+                // do NOT inherit the cached chest items from a previous window.
+                lastServerExtraResources.remove(playerUuid);
+                lastServerExtraResourcesWindowId.remove(playerUuid);
+                
                 resources = new com.hypixel.hytale.protocol.ExtraResources(new com.hypixel.hytale.protocol.ItemQuantity[0]);
-                if (packet instanceof OpenWindow openWindow) {
-                    openWindow.extraResources = resources;
-                } else if (packet instanceof UpdateWindow updateWindow) {
-                    updateWindow.extraResources = resources;
-                }
-                // Fall through to append virtual items below
+                openWindow.extraResources = resources;
                 appendVirtualItemsToResources(resources, virtualBaseQuantities);
-                // Cache this result for future replays
                 lastServerExtraResources.put(playerUuid, resources.clone());
+                lastServerExtraResourcesWindowId.put(playerUuid, openWindow.id);
+            } else if (packet instanceof UpdateWindow updateWindow) {
+                com.hypixel.hytale.protocol.ExtraResources cached = lastServerExtraResources.get(playerUuid);
+                Integer cachedId = lastServerExtraResourcesWindowId.get(playerUuid);
+                if (cached != null && cachedId != null && cachedId == updateWindow.id) {
+                    // Replay the exact same ExtraResources the client last received
+                    updateWindow.extraResources = cached.clone();
+                } else {
+                    // No cached data yet or window ID mismatch — create empty + append virtual items
+                    resources = new com.hypixel.hytale.protocol.ExtraResources(new com.hypixel.hytale.protocol.ItemQuantity[0]);
+                    updateWindow.extraResources = resources;
+                    appendVirtualItemsToResources(resources, virtualBaseQuantities);
+                    lastServerExtraResources.put(playerUuid, resources.clone());
+                    lastServerExtraResourcesWindowId.put(playerUuid, updateWindow.id);
+                }
             }
             return;
         }
 
         // ── Non-null ExtraResources (server provided chest items) ──
+        // Clone the server's resources to avoid modifying cached objects
+        com.hypixel.hytale.protocol.ExtraResources clonedResources = resources.clone();
+
         // Append virtual item base IDs, then cache the final result.
-        appendVirtualItemsToResources(resources, virtualBaseQuantities);
+        appendVirtualItemsToResources(clonedResources, virtualBaseQuantities);
 
         // Cache the fully-processed ExtraResources (chest items + virtual items)
         // so it can be replayed verbatim when the server sends null.
-        lastServerExtraResources.put(playerUuid, resources.clone());
+        lastServerExtraResources.put(playerUuid, clonedResources.clone());
+        if (packet instanceof OpenWindow openWindow) {
+            openWindow.extraResources = clonedResources;
+            lastServerExtraResourcesWindowId.put(playerUuid, openWindow.id);
+        } else if (packet instanceof UpdateWindow updateWindow) {
+            updateWindow.extraResources = clonedResources;
+            lastServerExtraResourcesWindowId.put(playerUuid, updateWindow.id);
+        }
     }
 
     /**
@@ -708,17 +740,7 @@ public class TooltipPacketAdapter {
 
             boolean modified = false;
 
-            if (value.isString()) {
-                String potentialItemId = value.asString().getValue();
-                if (!VirtualItemRegistry.isVirtualId(potentialItemId)) {
-                    String virtualId = findVirtualIdForItem(playerUuid, potentialItemId, language,
-                            newVirtualItems, translations);
-                    if (virtualId != null) {
-                        doc.put("0", new org.bson.BsonString(virtualId));
-                        modified = true;
-                    }
-                }
-            } else if (value.isArray()) {
+            if (value.isArray()) {
                 org.bson.BsonArray array = value.asArray();
                 for (int i = 0; i < array.size(); i++) {
                     BsonValue element = array.get(i);
@@ -793,7 +815,7 @@ public class TooltipPacketAdapter {
                             virtualItemRegistry.getOriginalDescription(itemId, language);
                     String enrichedDesc = composed.buildDescription(originalDesc);
                     translations.put(descKey, enrichedDesc);
-                    virtualItemRegistry.cacheDescription(virtualId, enrichedDesc);
+                    virtualItemRegistry.cacheDescription(virtualId, language, enrichedDesc);
                 }
 
                 if (composed.getNameOverride() != null) {
@@ -818,52 +840,6 @@ public class TooltipPacketAdapter {
         return false;
     }
 
-    @Nullable
-    private String findVirtualIdForItem(
-            @Nonnull UUID playerUuid,
-            @Nonnull String itemId,
-            @Nullable String language,
-            @Nonnull Map<String, ItemBase> newVirtualItems,
-            @Nonnull Map<String, String> translations) {
-
-        String virtualId = virtualItemRegistry.findVirtualIdForBaseItem(playerUuid, itemId);
-
-        if (virtualId != null) {
-            // Check if we have a cached composed tooltip for this virtual ID
-            String descKey = VirtualItemRegistry.getVirtualDescriptionKey(virtualId);
-            String cachedDesc = virtualItemRegistry.getCachedDescription(virtualId);
-
-            org.herolias.tooltips.api.ItemVisualOverrides visualOverrides = null;
-            // Try to recover visual overrides from the registry buffer if possible
-            // We can extract the hash from the virtualId
-            int separatorIndex = virtualId.indexOf(VirtualItemRegistry.VIRTUAL_SEPARATOR);
-            if (separatorIndex > 0) {
-                String hash = virtualId.substring(separatorIndex + VirtualItemRegistry.VIRTUAL_SEPARATOR.length());
-                TooltipRegistry.ComposedTooltip composed = tooltipRegistry.getComposed(hash);
-                if (composed != null) {
-                    visualOverrides = composed.getVisualOverrides();
-                }
-            }
-
-            // The virtual item base is already cached with the correct name override
-            // from when it was first created via processSection.
-            // If it's not in cache, we attempt to reconstruct it.
-            // Note: If visualOverrides is null (e.g. server restart cleared cache), we might lose visuals here.
-            // This is acceptable for now vs crashing or strict persistence.
-            ItemBase virtualBase = virtualItemRegistry.getOrCreateVirtualItemBase(
-                    itemId, virtualId, null, visualOverrides, null, null);
-
-            if (virtualBase != null) {
-                newVirtualItems.put(virtualId, virtualBase);
-                if (cachedDesc != null) {
-                    translations.put(descKey, cachedDesc);
-                }
-            }
-            return virtualId;
-        }
-
-        return null;
-    }
 
 
 
@@ -1028,37 +1004,7 @@ public class TooltipPacketAdapter {
                         addVirtualEquipmentItem(recipientRef, trackedBaseId, virtualId, newVirtualItems, translations);
                         rightHandVirtualized = true;
 
-                    } else {
-                         // Fallback: If the active slot didn't match, scan the entire hotbar.
-                         for (int i = 0; i < 9; i++) {
-                             if (i == slot) continue; // Already checked
-                             String otherVirtualId = virtualItemRegistry.getSlotVirtualId(observedPlayerUuid, "hotbar:" + i);
-                             if (otherVirtualId != null) {
-                                 String otherBaseId = VirtualItemRegistry.getBaseItemId(otherVirtualId);
-                                 if (otherBaseId != null && otherBaseId.equals(rightBaseId)) {
-                                     equipment.rightHandItemId = otherVirtualId;
-                                     addVirtualEquipmentItem(recipientRef, otherBaseId, otherVirtualId, newVirtualItems, translations);
-                                     rightHandVirtualized = true;
-                                     break;
-                                 }
-                             }
-                         }
                     }
-                } else {
-                     // Fallback: If the expected slot was empty/unknown, scan the hotbar anyway.
-                     for (int i = 0; i < 9; i++) {
-                         if (i == slot) continue;
-                         String otherVirtualId = virtualItemRegistry.getSlotVirtualId(observedPlayerUuid, "hotbar:" + i);
-                         if (otherVirtualId != null) {
-                             String otherBaseId = VirtualItemRegistry.getBaseItemId(otherVirtualId);
-                             if (otherBaseId != null && otherBaseId.equals(rightBaseId)) {
-                                 equipment.rightHandItemId = otherVirtualId;
-                                 addVirtualEquipmentItem(recipientRef, otherBaseId, otherVirtualId, newVirtualItems, translations);
-                                 rightHandVirtualized = true;
-                                 break;
-                             }
-                         }
-                     }
                 }
             }
         }
@@ -1152,7 +1098,7 @@ public class TooltipPacketAdapter {
                     virtualItemRegistry.getOriginalDescription(stackBaseId, recipientRef.getLanguage());
             String enrichedDesc = composed.buildDescription(originalDesc);
             translations.put(descKey, enrichedDesc);
-            virtualItemRegistry.cacheDescription(virtualId, enrichedDesc);
+            virtualItemRegistry.cacheDescription(virtualId, recipientRef.getLanguage(), enrichedDesc);
         }
         if (composed.getNameOverride() != null) {
             translations.put(VirtualItemRegistry.getVirtualNameKey(virtualId), composed.getNameOverride());
@@ -1180,7 +1126,7 @@ public class TooltipPacketAdapter {
         newVirtualItems.put(virtualId, virtualBase);
 
         String descKey = VirtualItemRegistry.getVirtualDescriptionKey(virtualId);
-        String cachedDesc = virtualItemRegistry.getCachedDescription(virtualId);
+        String cachedDesc = virtualItemRegistry.getCachedDescription(virtualId, recipientRef.getLanguage());
         if (cachedDesc != null) {
             translations.put(descKey, cachedDesc);
         }
@@ -1308,7 +1254,7 @@ public class TooltipPacketAdapter {
                         virtualItemRegistry.getOriginalDescription(baseItemId, language);
                 String enrichedDesc = composed.buildDescription(originalDesc);
                 translations.put(descKey, enrichedDesc);
-                virtualItemRegistry.cacheDescription(virtualId, enrichedDesc);
+                virtualItemRegistry.cacheDescription(virtualId, language, enrichedDesc);
             }
 
             // Handle name override translation

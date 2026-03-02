@@ -69,12 +69,28 @@ public interface DynamicTooltipsApi {
     void addGlobalLine(@Nonnull String baseItemId, @Nonnull String line);
 
     /**
+     * Appends a translation key to the global tooltip of an item type.
+     * This will be localized per player when computing the tooltip.
+     * @param baseItemId the base item ID
+     * @param translationKey the translation key to add
+     */
+    void addGlobalTranslationLine(@Nonnull String baseItemId, @Nonnull String translationKey);
+
+    /**
      * Replaces the global tooltip of an item type with the given lines.
      * This will affect all items of this type, without using virtual IDs.
      * @param baseItemId the base item ID
      * @param lines the lines to replace the description with
      */
     void replaceGlobalTooltip(@Nonnull String baseItemId, @Nonnull String... lines);
+
+    /**
+     * Replaces the global tooltip of an item type with the given translation keys.
+     * This will be localized per player when computing the tooltip.
+     * @param baseItemId the base item ID
+     * @param translationKeys the translation keys to replace the description with
+     */
+    void replaceGlobalTranslationTooltip(@Nonnull String baseItemId, @Nonnull String... translationKeys);
 
     /**
      * Clears all global tooltip overrides for this base item type.

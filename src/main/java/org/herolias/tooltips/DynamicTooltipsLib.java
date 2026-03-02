@@ -134,8 +134,20 @@ public class DynamicTooltipsLib extends JavaPlugin {
         }
 
         @Override
+        public void addGlobalTranslationLine(@Nonnull String baseItemId, @Nonnull String translationKey) {
+            globalTooltipManager.addGlobalTranslationLine(baseItemId, translationKey);
+            this.refreshAllPlayers();
+        }
+
+        @Override
         public void replaceGlobalTooltip(@Nonnull String baseItemId, @Nonnull String... lines) {
             globalTooltipManager.replaceGlobalTooltip(baseItemId, lines);
+            this.refreshAllPlayers();
+        }
+
+        @Override
+        public void replaceGlobalTranslationTooltip(@Nonnull String baseItemId, @Nonnull String... translationKeys) {
+            globalTooltipManager.replaceGlobalTranslationTooltip(baseItemId, translationKeys);
             this.refreshAllPlayers();
         }
 
