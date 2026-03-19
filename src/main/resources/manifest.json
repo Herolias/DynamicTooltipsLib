@@ -1,7 +1,7 @@
 {
     "Group": "org.herolias",
     "Name": "DynamicTooltipsLib",
-    "Version": "1.5.1",
+    "Version": "1.5.2",
     "Description": "Library mod that enables dynamic, per-item tooltips with multi-mod support",
     "Authors": [
         {

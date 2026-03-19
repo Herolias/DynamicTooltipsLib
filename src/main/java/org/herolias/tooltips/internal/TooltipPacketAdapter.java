@@ -541,7 +541,6 @@ public class TooltipPacketAdapter {
             processSection(playerUuid, "armor", packet.armor, language, newVirtualItems, translations);
             processSection(playerUuid, "storage", packet.storage, language, newVirtualItems, translations);
             processSection(playerUuid, "backpack", packet.backpack, language, newVirtualItems, translations);
-            processSection(playerUuid, "builderMaterial", packet.builderMaterial, language, newVirtualItems, translations);
         } catch (Exception e) {
             LOGGER.atSevere().log("Error in processPlayerInventory for " + playerUuid + ": " + e.getMessage());
         } finally {
@@ -594,7 +593,6 @@ public class TooltipPacketAdapter {
         collectVirtualItemsForCrafting(playerUuid, rawInv.armor, virtualBaseQuantities);
         collectVirtualItemsForCrafting(playerUuid, rawInv.storage, virtualBaseQuantities);
         collectVirtualItemsForCrafting(playerUuid, rawInv.backpack, virtualBaseQuantities);
-        collectVirtualItemsForCrafting(playerUuid, rawInv.builderMaterial, virtualBaseQuantities);
 
         if (virtualBaseQuantities.isEmpty()) return;
 
@@ -1463,7 +1461,6 @@ public class TooltipPacketAdapter {
         clone.armor = cloneSection(original.armor);
         clone.storage = cloneSection(original.storage);
         clone.backpack = cloneSection(original.backpack);
-        clone.builderMaterial = cloneSection(original.builderMaterial);
         return clone;
     }
 
