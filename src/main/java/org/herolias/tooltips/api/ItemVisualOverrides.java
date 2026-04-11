@@ -57,6 +57,10 @@ public final class ItemVisualOverrides {
     @Nullable private final ItemEntityConfig itemEntity;
     @Nullable private final Double durability;
 
+    // ── Name color / quality label overrides ──
+    @Nullable private final String nameColor;
+    @Nullable private final String qualityLabel;
+
     // ── Stat / tooltip structure overrides ──
     @Nullable private final ItemArmor armor;
     @Nullable private final ItemWeapon weapon;
@@ -93,6 +97,8 @@ public final class ItemVisualOverrides {
         this.displayEntityStatsHUD = builder.displayEntityStatsHUD;
         this.itemEntity = builder.itemEntity;
         this.durability = builder.durability;
+        this.nameColor = builder.nameColor;
+        this.qualityLabel = builder.qualityLabel;
         this.armor = builder.armor;
         this.weapon = builder.weapon;
         this.tool = builder.tool;
@@ -132,6 +138,24 @@ public final class ItemVisualOverrides {
     @Nullable public ItemEntityConfig getItemEntity() { return itemEntity; }
     @Nullable public Double getDurability() { return durability; }
 
+    // ── Getter (name color) ──
+
+    /**
+     * Returns the name color hex string (e.g. {@code "#FF0000"}), or {@code null} if not set.
+     * <p>
+     * When set, the library creates a custom item quality tier with this text color,
+     * cloning the original quality's tooltip/slot textures so only the name color changes.
+     */
+    @Nullable public String getNameColor() { return nameColor; }
+
+    /**
+     * Returns the quality label override, or {@code null} if not set.
+     * <p>
+     * An empty string hides the label entirely; a non-empty string replaces
+     * the label text (e.g. {@code "Legendary"} instead of {@code "Rare"}).
+     */
+    @Nullable public String getQualityLabel() { return qualityLabel; }
+
     // ── Getters (stat/tooltip structure overrides) ──
 
     /** Returns the armor override, or {@code null} if not set. */
@@ -163,6 +187,7 @@ public final class ItemVisualOverrides {
                 && clipsGeometry == null && renderDeployablePreview == null
                 && set == null && categories == null && displayEntityStatsHUD == null
                 && itemEntity == null && durability == null
+                && nameColor == null && qualityLabel == null
                 && armor == null && weapon == null && tool == null
                 && additionalArmorStatModifiers == null && additionalWeaponStatModifiers == null;
     }
@@ -198,6 +223,8 @@ public final class ItemVisualOverrides {
         if (displayEntityStatsHUD != null) sb.append("|desh:").append(Arrays.hashCode(displayEntityStatsHUD));
         if (itemEntity != null) sb.append("|ie:").append(itemEntity.hashCode());
         if (durability != null) sb.append("|dur:").append(durability);
+        if (nameColor != null) sb.append("|nc:").append(nameColor);
+        if (qualityLabel != null) sb.append("|ql:").append(qualityLabel);
         if (armor != null) sb.append("|arm:").append(deepHashItemArmor(armor));
         if (weapon != null) sb.append("|wpn:").append(deepHashItemWeapon(weapon));
         if (tool != null) sb.append("|tl:").append(tool.hashCode()); // ItemTool uses Arrays.hashCode correctly
@@ -279,6 +306,9 @@ public final class ItemVisualOverrides {
         private int[] displayEntityStatsHUD;
         private ItemEntityConfig itemEntity;
         private Double durability;
+        // Name color / quality label
+        private String nameColor;
+        private String qualityLabel;
         // Stat/tooltip structure overrides
         private ItemArmor armor;
         private ItemWeapon weapon;
@@ -333,6 +363,30 @@ public final class ItemVisualOverrides {
         @Nonnull public Builder itemEntity(@Nullable ItemEntityConfig config) { this.itemEntity = config; return this; }
         /** Override the max durability shown in the tooltip (purely visual). */
         @Nonnull public Builder durability(@Nullable Double durability) { this.durability = durability; return this; }
+
+        /**
+         * Override the item name color with an arbitrary hex color string.
+         * <p>
+         * Internally, the library creates a custom quality tier that clones the item's
+         * original quality (preserving tooltip textures, slot textures, etc.) and only
+         * changes the {@code textColor}. This allows full control over the name color
+         * independent of the item's rarity tier.
+         *
+         * @param hexColor a hex color string, e.g. {@code "#FF0000"} for red
+         */
+        @Nonnull public Builder nameColor(@Nullable String hexColor) { this.nameColor = hexColor; return this; }
+
+        /**
+         * Override the quality label text shown in the item tooltip.
+         * <p>
+         * Pass an empty string ({@code ""}) to hide the label entirely.
+         * Pass a non-empty string to replace the label text
+         * (e.g. {@code "Legendary"} instead of the default {@code "Rare"}).
+         * Pass {@code null} (the default) to keep the original label.
+         *
+         * @param label the label text, empty string to hide, or {@code null} to keep original
+         */
+        @Nonnull public Builder qualityLabel(@Nullable String label) { this.qualityLabel = label; return this; }
 
         // ── Stat / tooltip structure overrides (raw protocol objects) ──
 

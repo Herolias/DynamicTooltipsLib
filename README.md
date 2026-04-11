@@ -21,6 +21,7 @@ I will add more features and update the library regularly.
 3. [Usage](#usage)
 4. [API Reference](#api-reference)
    - [Global Tooltip APIs](#global-tooltip-apis)
+   - [Item-ID-Specific Global Tooltips](#item-id-specific-global-tooltips)
 5. [Advanced Topics](#advanced-topics)
 6. [Architecture](#architecture)
 7. [Performance](#performance)
@@ -33,6 +34,8 @@ I will add more features and update the library regularly.
 - **Mod Compatibility**: Uses a **Priority System** so multiple mods can add lines to the same item without conflict.
 - **Locale-Aware Tooltips**: Providers receive the player's language code, enabling per-player translated tooltip content without extra packet work.
 - **Uniform Virtual IDs**: Uses per-instance virtual item IDs for **all** inventory sections (hotbar, utility, tools, armor, storage, etc.), with an inbound filter to translate IDs back for interaction packets.
+- **Name Color Override**: Override item name colors with arbitrary hex colors, independent of the item's rarity tier.
+- **Quality Label Override**: Change or hide the quality label text (e.g. "Rare") shown in the item tooltip.
 - **High Performance**: Caches item states and packet diffs to minimize network traffic and CPU usage.
 
 ---
@@ -224,6 +227,40 @@ if (api != null) {
 
 > **Note:** The Global APIs modify translations via network packets and do not use virtual item IDs. They affect the base item directly and persist across player connections and language changes.
 
+> **Important:** The regular global methods above modify a **shared translation key**. If multiple item types share the same description key (e.g. all Pickaxes share `server.items.tools.pickaxe.description`), changing one will change them all. To target a single item type without affecting others, use the **Item-ID-Specific** methods below.
+
+#### Item-ID-Specific Global Tooltips
+
+These methods work like the regular global methods, but only affect the **exact item type** you specify. Other items that share the same description translation key are **not affected**.
+
+Internally, the library overrides the item's definition to point to a unique description key (`server.items.dynamic.global.<itemId>.description`), so the original shared key is left untouched for other items.
+
+*   `addItemGlobalLine(String baseItemId, String line)`: Appends a line to only this item type's tooltip.
+*   `addItemGlobalTranslationLine(String baseItemId, String translationKey)`: Appends a localized translation key line to only this item type's tooltip.
+*   `replaceItemGlobalTooltip(String baseItemId, String... lines)`: Replaces the tooltip of only this item type.
+*   `replaceItemGlobalTranslationTooltip(String baseItemId, String... translationKeys)`: Replaces with translation keys, for only this item type.
+*   `clearItemGlobalTooltips(String baseItemId)`: Clears the item-specific override and restores the original (shared) description key.
+
+```java
+DynamicTooltipsApi api = DynamicTooltipsApiProvider.get();
+if (api != null) {
+    // Only the Adamantite Pickaxe gets this line — other pickaxes are unaffected,
+    // even though they share the same description translation key.
+    api.addItemGlobalLine("Tool_Pickaxe_Adamantite",
+        "<color is=\"#00FFAA\">Can mine Custom Ore</color>");
+
+    // Replace the entire tooltip for only the Apple
+    api.replaceItemGlobalTooltip("Plant_Fruit_Apple",
+        "<color is=\"#FFD700\">A legendary fruit.</color>",
+        "<color is=\"#AAAAAA\">Restores full health on use.</color>");
+
+    // Clear and restore the original shared description
+    api.clearItemGlobalTooltips("Tool_Pickaxe_Adamantite");
+}
+```
+
+> **Tip:** Item-specific overrides take priority over regular (key-wide) global overrides for the same item. If an item has both, only the item-specific description is shown for that item type.
+
 ### Custom UI Support
 
 DynamicTooltipsLib automatically intercepts and applies visual overrides and dynamic tooltips to your custom UI documents (`.ui` files), provided your UI is structured correctly. 
@@ -286,6 +323,8 @@ The following fields map directly to `ItemBase` properties. Some of them are exp
 | `texture` | `String` | Texture asset path |
 | `scale` | `Float` | Model scale multiplier |
 | `qualityIndex` | `Integer` | Item quality/rarity tier |
+| `nameColor` | `String` | Item name color override (hex, e.g. `"#FF0000"`) |
+| `qualityLabel` | `String` | Quality label text override (empty string to hide) |
 | `clipsGeometry` | `Boolean` | Whether the model clips through world geometry |
 | `set` | `String` | Item set membership (visual grouping) |
 | **UI & Icon** | | |
@@ -318,6 +357,65 @@ The following fields map directly to `ItemBase` properties. Some of them are exp
 | `armor` | `ItemArmor` | Replace the entire armor config (slot, modifiers, resistances) |
 | `weapon` | `ItemWeapon` | Replace the entire weapon config (stat modifiers, dual wield) |
 | `tool` | `ItemTool` | Replace the entire tool config (specs, speed) |
+
+#### Name Color Override
+
+By default, an item's name color is determined by its quality (rarity) tier and **cannot** be changed with `<color>` tags like the description can. The `nameColor` field gives you full control over the name color independent of the item's rarity.
+
+Internally, the library creates a custom quality tier that clones the item's original quality (preserving tooltip border textures, slot textures, etc.) and only changes the `textColor`. This custom quality is sent to the client via `UpdateItemQualities` packets.
+
+```java
+return TooltipData.builder()
+    .hashInput("enchanted_sword")
+    .addLine("<color is=\"#FFAA00\">Sharpness V</color>")
+    .visualOverrides(ItemVisualOverrides.builder()
+        .nameColor("#FF0000") // Red name!
+        .build())
+    .build();
+```
+
+You can combine `nameColor` with `qualityIndex` — the name color will be applied on top of the overridden quality's textures:
+
+```java
+.visualOverrides(ItemVisualOverrides.builder()
+    .qualityIndex(4)          // Use Epic quality textures (purple border)
+    .nameColor("#FFD700")     // But gold name text
+    .build())
+```
+
+Known quality tier colors for reference:
+
+| Quality | Hex | Color |
+| :--- | :--- | :--- |
+| Junk / Common | `#c9d2dd` | Light gray |
+| Uncommon | `#3e9049` | Green |
+| Rare | `#2770b7` | Blue |
+| Epic | `#8b339e` | Purple |
+| Legendary | `#bb8a2c` | Gold |
+
+#### Quality Label Override
+
+The quality label (e.g. "Rare" in the top-right corner of the tooltip) can be customized or hidden via `qualityLabel`:
+
+```java
+// Hide the label entirely
+.visualOverrides(ItemVisualOverrides.builder()
+    .qualityLabel("")
+    .build())
+
+// Custom label text
+.visualOverrides(ItemVisualOverrides.builder()
+    .qualityLabel("Legendary")
+    .build())
+
+// Combine with nameColor for full control
+.visualOverrides(ItemVisualOverrides.builder()
+    .nameColor("#FFD700")
+    .qualityLabel("Mythic")
+    .build())
+```
+
+> **Note:** The quality label color is tied to the same `textColor` as the item name in the Hytale protocol. If you override `nameColor`, the label will also use that color.
 
 #### Convenience Methods (EXPERIMENTAL)
 

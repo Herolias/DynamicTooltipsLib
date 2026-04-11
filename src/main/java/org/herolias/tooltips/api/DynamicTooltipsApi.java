@@ -93,10 +93,67 @@ public interface DynamicTooltipsApi {
     void replaceGlobalTranslationTooltip(@Nonnull String baseItemId, @Nonnull String... translationKeys);
 
     /**
-     * Clears all global tooltip overrides for this base item type.
+     * Clears all regular (translation-key-wide) global tooltip overrides for this base item type.
      * @param baseItemId the base item ID
      */
     void clearGlobalTooltips(@Nonnull String baseItemId);
+
+    // ─────────────────────────────────────────────────────────────────────
+    //  Item-ID-specific global tooltips
+    // ─────────────────────────────────────────────────────────────────────
+    //
+    //  Unlike the regular global methods above (which modify a shared
+    //  translation key and therefore affect ALL item types that share it),
+    //  these methods only affect the exact item type specified.
+    //
+    //  Internally, the item's definition is overridden to use a unique
+    //  description key, so other items sharing the original key are
+    //  unaffected.
+    //
+
+    /**
+     * Appends a line to the global tooltip of <b>only</b> this exact item type.
+     * Other items sharing the same description translation key are not affected.
+     *
+     * @param baseItemId the base item ID
+     * @param line the line to add
+     */
+    void addItemGlobalLine(@Nonnull String baseItemId, @Nonnull String line);
+
+    /**
+     * Appends a translation key to the item-specific global tooltip.
+     * This will be localized per player when computing the tooltip.
+     *
+     * @param baseItemId the base item ID
+     * @param translationKey the translation key to add
+     */
+    void addItemGlobalTranslationLine(@Nonnull String baseItemId, @Nonnull String translationKey);
+
+    /**
+     * Replaces the global tooltip of <b>only</b> this exact item type with the given lines.
+     * Other items sharing the same description translation key are not affected.
+     *
+     * @param baseItemId the base item ID
+     * @param lines the lines to replace the description with
+     */
+    void replaceItemGlobalTooltip(@Nonnull String baseItemId, @Nonnull String... lines);
+
+    /**
+     * Replaces the global tooltip of <b>only</b> this exact item type with the
+     * given translation keys.
+     *
+     * @param baseItemId the base item ID
+     * @param translationKeys the translation keys to replace the description with
+     */
+    void replaceItemGlobalTranslationTooltip(@Nonnull String baseItemId, @Nonnull String... translationKeys);
+
+    /**
+     * Clears all item-ID-specific global tooltip overrides for this base item type
+     * and restores the item to its original (potentially shared) description key.
+     *
+     * @param baseItemId the base item ID
+     */
+    void clearItemGlobalTooltips(@Nonnull String baseItemId);
 
     // ─────────────────────────────────────────────────────────────────────
     //  Cache invalidation
