@@ -74,6 +74,11 @@ public class DynamicTooltipsLib extends JavaPlugin {
         this.getEventRegistry().registerGlobal(com.hypixel.hytale.server.core.event.events.player.PlayerConnectEvent.class, this::onPlayerConnect);
         LOGGER.atInfo().log("Registered PlayerConnectEvent listener for global tooltips");
 
+        // Reserve quality slots after all asset packs are loaded (priority 0 runs after
+        // AssetModule's -16 which loads pack assets and preloads DEFAULT_ITEM_QUALITY).
+        this.getEventRegistry().register((short) 0, com.hypixel.hytale.server.core.asset.LoadAssetEvent.class,
+                event -> virtualItemRegistry.reserveQualitySlots());
+
         LOGGER.atInfo().log("DynamicTooltipsLib setup complete — API registered");
     }
 
@@ -154,6 +159,38 @@ public class DynamicTooltipsLib extends JavaPlugin {
         @Override
         public void clearGlobalTooltips(@Nonnull String baseItemId) {
             globalTooltipManager.clearGlobalTooltips(baseItemId);
+            this.refreshAllPlayers();
+        }
+
+        // ── Item-ID-specific global tooltips ──
+
+        @Override
+        public void addItemGlobalLine(@Nonnull String baseItemId, @Nonnull String line) {
+            globalTooltipManager.addItemGlobalLine(baseItemId, line);
+            this.refreshAllPlayers();
+        }
+
+        @Override
+        public void addItemGlobalTranslationLine(@Nonnull String baseItemId, @Nonnull String translationKey) {
+            globalTooltipManager.addItemGlobalTranslationLine(baseItemId, translationKey);
+            this.refreshAllPlayers();
+        }
+
+        @Override
+        public void replaceItemGlobalTooltip(@Nonnull String baseItemId, @Nonnull String... lines) {
+            globalTooltipManager.replaceItemGlobalTooltip(baseItemId, lines);
+            this.refreshAllPlayers();
+        }
+
+        @Override
+        public void replaceItemGlobalTranslationTooltip(@Nonnull String baseItemId, @Nonnull String... translationKeys) {
+            globalTooltipManager.replaceItemGlobalTranslationTooltip(baseItemId, translationKeys);
+            this.refreshAllPlayers();
+        }
+
+        @Override
+        public void clearItemGlobalTooltips(@Nonnull String baseItemId) {
+            globalTooltipManager.clearItemGlobalTooltips(baseItemId);
             this.refreshAllPlayers();
         }
 

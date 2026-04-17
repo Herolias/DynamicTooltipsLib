@@ -299,6 +299,8 @@ public class TooltipRegistry {
                 if (vo.getArmor() != null) visualBuilder.armor(vo.getArmor());
                 if (vo.getWeapon() != null) visualBuilder.weapon(vo.getWeapon());
                 if (vo.getTool() != null) visualBuilder.tool(vo.getTool());
+                if (vo.getNameColor() != null) visualBuilder.nameColor(vo.getNameColor());
+                if (vo.getQualityLabel() != null) visualBuilder.qualityLabel(vo.getQualityLabel());
                 if (vo.getAdditionalArmorStatModifiers() != null) visualBuilder.addArmorStatModifiers(vo.getAdditionalArmorStatModifiers());
                 if (vo.getAdditionalWeaponStatModifiers() != null) visualBuilder.addWeaponStatModifiers(vo.getAdditionalWeaponStatModifiers());
             }

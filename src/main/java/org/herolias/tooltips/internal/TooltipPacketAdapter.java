@@ -406,6 +406,21 @@ public class TooltipPacketAdapter {
                 processCraftingWindowExtraResources(playerRef, updateWindow);
             } else if (packet instanceof CustomPage customPage) {
                 processCustomPage(playerRef, customPage);
+            } else if (packet instanceof UpdateItems updateItemsPacket) {
+                // ─────────────────────────────────────────────────────────────────────
+                //  Item Definition Init Injection
+                // ─────────────────────────────────────────────────────────────────────
+                //  When the client first connects, the server sends
+                //  UpdateItems(Init, allItemDefinitions). We inject item-specific
+                //  global tooltip overrides directly into this packet so the
+                //  client's item definitions point to unique description keys
+                //  from the start.
+                if (updateItemsPacket.type == UpdateType.Init && globalTooltipManager != null) {
+                    if (updateItemsPacket.items != null) {
+                        updateItemsPacket.items = new HashMap<>(updateItemsPacket.items);
+                    }
+                    globalTooltipManager.injectIntoInitItemsPacket(updateItemsPacket);
+                }
             } else if (packet instanceof UpdateTranslations translationsPacket) {
                 // ─────────────────────────────────────────────────────────────────────
                 //  Language Change Detection
@@ -1293,6 +1308,33 @@ public class TooltipPacketAdapter {
             }
         }
 
+        // Send custom quality definitions (for nameColor overrides) before
+        // item definitions, so the client has the quality when it processes the item.
+        Set<Integer> customQualityIndices = new HashSet<>();
+        for (ItemBase base : newVirtualItems.values()) {
+            if (base != null && virtualItemRegistry.isCustomQualityIndex(base.qualityIndex)) {
+                customQualityIndices.add(base.qualityIndex);
+            }
+        }
+        if (!customQualityIndices.isEmpty()) {
+            Map<Integer, com.hypixel.hytale.protocol.ItemQuality> unsentQualities =
+                    virtualItemRegistry.markAndGetUnsentQualities(playerUuid, customQualityIndices);
+            if (!unsentQualities.isEmpty()) {
+                sendUpdateItemQualities(playerRef, unsentQualities);
+            }
+
+            // Include quality label translations for custom labels
+            for (int qIdx : customQualityIndices) {
+                String labelText = virtualItemRegistry.getQualityLabelTranslation(qIdx);
+                if (labelText != null) {
+                    com.hypixel.hytale.protocol.ItemQuality q = virtualItemRegistry.getCustomQualityProtocol(qIdx);
+                    if (q != null && q.localizationKey != null) {
+                        translations.put(q.localizationKey, labelText);
+                    }
+                }
+            }
+        }
+
         // Send virtual item definitions the player hasn't seen yet
         Set<String> unsentItems = virtualItemRegistry.markAndGetUnsent(
                 playerUuid, newVirtualItems.keySet());
@@ -1334,6 +1376,21 @@ public class TooltipPacketAdapter {
         }
     }
 
+    private void sendUpdateItemQualities(@Nonnull PlayerRef playerRef,
+                                         @Nonnull Map<Integer, com.hypixel.hytale.protocol.ItemQuality> qualities) {
+        try {
+            com.hypixel.hytale.protocol.packets.assets.UpdateItemQualities packet =
+                    new com.hypixel.hytale.protocol.packets.assets.UpdateItemQualities();
+            packet.type = UpdateType.AddOrUpdate;
+            packet.maxId = com.hypixel.hytale.server.core.asset.type.item.config.ItemQuality
+                    .getAssetMap().getNextIndex();
+            packet.itemQualities = qualities;
+            playerRef.getPacketHandler().writeNoCache(packet);
+        } catch (Exception e) {
+            LOGGER.atWarning().log("Failed to send UpdateItemQualities: " + e.getMessage());
+        }
+    }
+
     private void sendUpdateItems(@Nonnull PlayerRef playerRef,
                                  @Nonnull Map<String, ItemBase> items) {
         try {
@@ -1362,6 +1419,7 @@ public class TooltipPacketAdapter {
             LOGGER.atWarning().log("Failed to send UpdateTranslations for virtual items: " + e.getMessage());
         }
     }
+
 
 
 

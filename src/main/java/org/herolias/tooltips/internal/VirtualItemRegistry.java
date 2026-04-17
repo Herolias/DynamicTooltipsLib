@@ -1,6 +1,7 @@
 package org.herolias.tooltips.internal;
 
 import com.hypixel.hytale.logger.HytaleLogger;
+import com.hypixel.hytale.protocol.Color;
 import com.hypixel.hytale.protocol.ItemBase;
 import com.hypixel.hytale.protocol.ItemArmor;
 import com.hypixel.hytale.protocol.ItemEntityConfig;
@@ -99,6 +100,39 @@ public class VirtualItemRegistry {
      * Used to auto-resolve rarity particles when qualityIndex is overridden.
      */
     private volatile Map<Integer, ItemEntityConfig> qualityEntityConfigCache;
+
+    // ─────────────────────────────────────────────────────────────────────
+    //  Custom quality management (for nameColor overrides)
+    // ─────────────────────────────────────────────────────────────────────
+
+    private static final String CUSTOM_QUALITY_PACK_KEY = "DynamicTooltipsLib";
+    private static final int QUALITY_RESERVE_SLOTS = 50;
+
+    /**
+     * Cache: "originalQualityIndex:nameColorHex" → assigned quality index
+     * in the server's {@code ItemQuality} asset map.
+     */
+    private final ConcurrentHashMap<String, Integer> customQualityIndices = new ConcurrentHashMap<>();
+
+    /**
+     * Protocol-level quality objects keyed by index, for sending via AddOrUpdate.
+     */
+    private final ConcurrentHashMap<Integer, com.hypixel.hytale.protocol.ItemQuality> customQualityProtocols = new ConcurrentHashMap<>();
+
+    /**
+     * Quality label translations: qualityIndex → label text.
+     * Only populated for qualities with a custom label (non-null, non-empty qualityLabel).
+     */
+    private final ConcurrentHashMap<Integer, String> qualityLabelTranslations = new ConcurrentHashMap<>();
+
+    /** Per-player tracking of which custom quality indices have been sent. */
+    private final ConcurrentHashMap<UUID, Set<Integer>> sentQualitiesToPlayer = new ConcurrentHashMap<>();
+
+    /** Pre-registered placeholder indices available for assignment. */
+    private final List<Integer> reservedSlotIndices = new ArrayList<>();
+
+    /** Next reserved slot to assign. */
+    private int nextReservedSlot = 0;
 
     /**
      * Simple thread-safe LRU Cache implementation.
@@ -236,6 +270,12 @@ public class VirtualItemRegistry {
                     if (visualOverrides.getSoundEventIndex() != null) clone.soundEventIndex = visualOverrides.getSoundEventIndex();
                     if (visualOverrides.getScale() != null) clone.scale = visualOverrides.getScale();
                     if (visualOverrides.getQualityIndex() != null) clone.qualityIndex = visualOverrides.getQualityIndex();
+                    if (visualOverrides.getNameColor() != null || visualOverrides.getQualityLabel() != null) {
+                        int baseQualityIdx = clone.qualityIndex;
+                        int customIdx = getOrCreateCustomQualityIndex(
+                                baseQualityIdx, visualOverrides.getNameColor(), visualOverrides.getQualityLabel());
+                        if (customIdx >= 0) clone.qualityIndex = customIdx;
+                    }
                     if (visualOverrides.getLight() != null) clone.light = visualOverrides.getLight();
                     if (visualOverrides.getParticles() != null) clone.particles = visualOverrides.getParticles();
                     if (visualOverrides.getPlayerAnimationsId() != null) clone.playerAnimationsId = visualOverrides.getPlayerAnimationsId();
@@ -384,6 +424,194 @@ public class VirtualItemRegistry {
             }
         }
         return cache.get(qualityIndex);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    //  Custom quality management
+    // ─────────────────────────────────────────────────────────────────────
+
+    /**
+     * Reserves placeholder quality slots by registering them in the server's
+     * asset map via {@code loadAssets()}. <b>Must be called during plugin
+     * {@code setup()}</b> — before any player connects — so that:
+     * <ul>
+     *   <li>Indices come from the shared {@code nextIndex} counter (no mod conflicts)</li>
+     *   <li>{@code handleRemoveOrUpdate} skips broadcasting (no players yet)</li>
+     *   <li>The Init packet automatically includes all placeholders</li>
+     * </ul>
+     */
+    public void reserveQualitySlots() {
+        try {
+            var assetMap = com.hypixel.hytale.server.core.asset.type.item.config.ItemQuality.getAssetMap();
+            var assetStore = com.hypixel.hytale.server.core.asset.type.item.config.ItemQuality.getAssetStore();
+            var defaultQ = com.hypixel.hytale.server.core.asset.type.item.config.ItemQuality.DEFAULT_ITEM_QUALITY;
+
+            List<com.hypixel.hytale.server.core.asset.type.item.config.ItemQuality> placeholders = new ArrayList<>();
+            for (int i = 0; i < QUALITY_RESERVE_SLOTS; i++) {
+                String id = "dtt_reserved_" + i;
+                placeholders.add(new com.hypixel.hytale.server.core.asset.type.item.config.ItemQuality(
+                        id,
+                        defaultQ.getQualityValue(),
+                        defaultQ.getItemTooltipTexture(),
+                        defaultQ.getItemTooltipArrowTexture(),
+                        defaultQ.getSlotTexture(),
+                        defaultQ.getBlockSlotTexture(),
+                        defaultQ.getSpecialSlotTexture(),
+                        defaultQ.getTextColor(),
+                        defaultQ.getLocalizationKey(),
+                        false,
+                        false,
+                        true,
+                        null
+                ));
+            }
+
+            assetStore.loadAssets(CUSTOM_QUALITY_PACK_KEY, placeholders);
+
+            for (int i = 0; i < QUALITY_RESERVE_SLOTS; i++) {
+                int idx = assetMap.getIndex("dtt_reserved_" + i);
+                if (idx != Integer.MIN_VALUE) {
+                    reservedSlotIndices.add(idx);
+                }
+            }
+            LOGGER.atInfo().log("Reserved " + reservedSlotIndices.size()
+                    + " quality slots (indices " + reservedSlotIndices.get(0)
+                    + "–" + reservedSlotIndices.get(reservedSlotIndices.size() - 1) + ")");
+        } catch (Exception e) {
+            LOGGER.atSevere().log("Failed to reserve quality slots: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Gets or creates a custom quality index for the given base quality + overrides.
+     * <p>
+     * Uses a pre-reserved slot from {@link #reserveQualitySlots()} and builds
+     * the protocol-level quality object. The actual packet is sent to the player
+     * by the {@code TooltipPacketAdapter} in {@code sendAuxiliaryPackets()}.
+     *
+     * @param originalQualityIndex the item's original (or overridden) quality index
+     * @param nameColorHex         hex color for the name (e.g. {@code "#FF0000"}), or {@code null} to keep original
+     * @param qualityLabel         label text override: {@code null} = keep original,
+     *                             empty string = hide label, non-empty = custom text
+     * @return the quality index, or {@code -1} if no slots are available
+     */
+    public int getOrCreateCustomQualityIndex(int originalQualityIndex,
+                                             @Nullable String nameColorHex,
+                                             @Nullable String qualityLabel) {
+        String cacheKey = originalQualityIndex + ":"
+                + Objects.toString(nameColorHex, "") + ":"
+                + (qualityLabel != null ? qualityLabel : "\0");
+        Integer existing = customQualityIndices.get(cacheKey);
+        if (existing != null) return existing;
+
+        return customQualityIndices.computeIfAbsent(cacheKey, k -> {
+            try {
+                if (nextReservedSlot >= reservedSlotIndices.size()) {
+                    LOGGER.atWarning().log("No more reserved quality slots available");
+                    return -1;
+                }
+                int idx = reservedSlotIndices.get(nextReservedSlot++);
+
+                var assetMap = com.hypixel.hytale.server.core.asset.type.item.config.ItemQuality.getAssetMap();
+                var baseQuality = assetMap.getAsset(originalQualityIndex);
+                if (baseQuality == null) {
+                    baseQuality = com.hypixel.hytale.server.core.asset.type.item.config.ItemQuality.DEFAULT_ITEM_QUALITY;
+                }
+
+                com.hypixel.hytale.protocol.ItemQuality proto = new com.hypixel.hytale.protocol.ItemQuality();
+                proto.id = "dtt_custom_q" + idx;
+                proto.itemTooltipTexture = baseQuality.getItemTooltipTexture();
+                proto.itemTooltipArrowTexture = baseQuality.getItemTooltipArrowTexture();
+                proto.slotTexture = baseQuality.getSlotTexture();
+                proto.blockSlotTexture = baseQuality.getBlockSlotTexture();
+                proto.specialSlotTexture = baseQuality.getSpecialSlotTexture();
+                proto.renderSpecialSlot = baseQuality.isRenderSpecialSlot();
+                proto.hideFromSearch = baseQuality.isHiddenFromSearch();
+
+                // Text color: override or preserve original
+                if (nameColorHex != null) {
+                    proto.textColor = parseHexColor(nameColorHex);
+                } else {
+                    proto.textColor = baseQuality.getTextColor();
+                }
+
+                // Quality label: null → keep original, "" → hide, non-empty → custom text
+                if (qualityLabel == null) {
+                    proto.visibleQualityLabel = baseQuality.isVisibleQualityLabel();
+                    proto.localizationKey = baseQuality.getLocalizationKey();
+                } else if (qualityLabel.isEmpty()) {
+                    proto.visibleQualityLabel = false;
+                    proto.localizationKey = baseQuality.getLocalizationKey();
+                } else {
+                    proto.visibleQualityLabel = true;
+                    String customLocKey = "server.general.qualities." + proto.id;
+                    proto.localizationKey = customLocKey;
+                    qualityLabelTranslations.put(idx, qualityLabel);
+                }
+
+                customQualityProtocols.put(idx, proto);
+                return idx;
+            } catch (Exception e) {
+                LOGGER.atWarning().log("Failed to create custom quality for index "
+                        + originalQualityIndex + ": " + e.getMessage());
+                return -1;
+            }
+        });
+    }
+
+    /**
+     * Returns whether this index is a custom quality (has a protocol object to send).
+     */
+    public boolean isCustomQualityIndex(int index) {
+        return customQualityProtocols.containsKey(index);
+    }
+
+    /**
+     * Returns the protocol quality at the given index, or null.
+     */
+    @Nullable
+    public com.hypixel.hytale.protocol.ItemQuality getCustomQualityProtocol(int index) {
+        return customQualityProtocols.get(index);
+    }
+
+    /**
+     * Returns the custom label text for the given quality index, or {@code null}
+     * if the quality doesn't have a custom label.
+     */
+    @Nullable
+    public String getQualityLabelTranslation(int index) {
+        return qualityLabelTranslations.get(index);
+    }
+
+    /**
+     * Returns the subset of custom quality indices that have not yet been sent
+     * to the given player, and marks them as sent.
+     */
+    @Nonnull
+    public Map<Integer, com.hypixel.hytale.protocol.ItemQuality> markAndGetUnsentQualities(
+            @Nonnull UUID playerUuid, @Nonnull Set<Integer> qualityIndices) {
+        Set<Integer> sentSet = sentQualitiesToPlayer.computeIfAbsent(playerUuid, u -> ConcurrentHashMap.newKeySet());
+        Map<Integer, com.hypixel.hytale.protocol.ItemQuality> unsent = new LinkedHashMap<>();
+        for (int idx : qualityIndices) {
+            if (sentSet.add(idx)) {
+                com.hypixel.hytale.protocol.ItemQuality q = customQualityProtocols.get(idx);
+                if (q != null) unsent.put(idx, q);
+            }
+        }
+        return unsent;
+    }
+
+    @Nonnull
+    static Color parseHexColor(@Nonnull String hex) {
+        String clean = hex.startsWith("#") ? hex.substring(1) : hex;
+        if (clean.length() != 6) {
+            LOGGER.atWarning().log("Invalid hex color '" + hex + "', defaulting to white");
+            return new Color((byte) 0xFF, (byte) 0xFF, (byte) 0xFF);
+        }
+        int r = Integer.parseInt(clean.substring(0, 2), 16);
+        int g = Integer.parseInt(clean.substring(2, 4), 16);
+        int b = Integer.parseInt(clean.substring(4, 6), 16);
+        return new Color((byte) r, (byte) g, (byte) b);
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -565,6 +793,7 @@ public class VirtualItemRegistry {
     public void onPlayerLeave(@Nonnull UUID playerUuid) {
         sentToPlayer.remove(playerUuid);
         playerSlotVirtualIds.remove(playerUuid);
+        sentQualitiesToPlayer.remove(playerUuid);
     }
 
     /**
@@ -576,7 +805,7 @@ public class VirtualItemRegistry {
     public void invalidatePlayer(@Nonnull UUID playerUuid) {
         sentToPlayer.remove(playerUuid);
         playerSlotVirtualIds.remove(playerUuid);
-        // Clear built descriptions so they are recomposed with fresh text
+        sentQualitiesToPlayer.remove(playerUuid);
         builtDescriptionCache.clear();
     }
 
@@ -602,6 +831,7 @@ public class VirtualItemRegistry {
         originalDescriptionCache.clear();
         originalNameCache.clear();
         builtDescriptionCache.clear();
+        sentQualitiesToPlayer.clear();
     }
 
     // ── Static helper for merging modifier maps ──
