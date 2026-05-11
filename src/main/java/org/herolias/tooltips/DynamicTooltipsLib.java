@@ -39,8 +39,6 @@ public class DynamicTooltipsLib extends JavaPlugin {
     private GlobalTooltipManager globalTooltipManager;
     private TooltipPacketAdapter packetAdapter;
 
-
-
     public DynamicTooltipsLib(@Nonnull JavaPluginInit init) {
         super(init);
         LOGGER.atInfo().log("DynamicTooltipsLib v"
@@ -67,11 +65,15 @@ public class DynamicTooltipsLib extends JavaPlugin {
         DynamicTooltipsApiProvider.register(api);
 
         // Register PlayerDisconnectEvent to clean up registry cache
-        this.getEventRegistry().registerGlobal(com.hypixel.hytale.server.core.event.events.player.PlayerDisconnectEvent.class, this::onPlayerDisconnect);
+        this.getEventRegistry().registerGlobal(
+                com.hypixel.hytale.server.core.event.events.player.PlayerDisconnectEvent.class,
+                this::onPlayerDisconnect);
         LOGGER.atInfo().log("Registered PlayerDisconnectEvent listener for cleanup");
 
-        // Register PlayerConnectEvent to push global tooltip updates to newly joined players
-        this.getEventRegistry().registerGlobal(com.hypixel.hytale.server.core.event.events.player.PlayerConnectEvent.class, this::onPlayerConnect);
+        // Register PlayerConnectEvent to push global tooltip updates to newly joined
+        // players
+        this.getEventRegistry().registerGlobal(
+                com.hypixel.hytale.server.core.event.events.player.PlayerConnectEvent.class, this::onPlayerConnect);
         LOGGER.atInfo().log("Registered PlayerConnectEvent listener for global tooltips");
 
         // Reserve quality slots after all asset packs are loaded (priority 0 runs after
@@ -95,10 +97,8 @@ public class DynamicTooltipsLib extends JavaPlugin {
         }
     }
 
-
-
     // ─────────────────────────────────────────────────────────────────────
-    //  API implementation (package-private inner class)
+    // API implementation (package-private inner class)
     // ─────────────────────────────────────────────────────────────────────
 
     private static class DynamicTooltipsApiImpl implements DynamicTooltipsApi {
@@ -108,9 +108,9 @@ public class DynamicTooltipsLib extends JavaPlugin {
         private final GlobalTooltipManager globalTooltipManager;
 
         DynamicTooltipsApiImpl(TooltipRegistry registry,
-                               VirtualItemRegistry virtualItemRegistry,
-                               TooltipPacketAdapter packetAdapter,
-                               GlobalTooltipManager globalTooltipManager) {
+                VirtualItemRegistry virtualItemRegistry,
+                TooltipPacketAdapter packetAdapter,
+                GlobalTooltipManager globalTooltipManager) {
             this.registry = registry;
             this.virtualItemRegistry = virtualItemRegistry;
             this.packetAdapter = packetAdapter;
@@ -183,7 +183,8 @@ public class DynamicTooltipsLib extends JavaPlugin {
         }
 
         @Override
-        public void replaceItemGlobalTranslationTooltip(@Nonnull String baseItemId, @Nonnull String... translationKeys) {
+        public void replaceItemGlobalTranslationTooltip(@Nonnull String baseItemId,
+                @Nonnull String... translationKeys) {
             globalTooltipManager.replaceItemGlobalTranslationTooltip(baseItemId, translationKeys);
             this.refreshAllPlayers();
         }
@@ -207,7 +208,7 @@ public class DynamicTooltipsLib extends JavaPlugin {
             registry.clearCache();
             virtualItemRegistry.clearCache();
             packetAdapter.invalidateAllPlayers();
-            LOGGER.atInfo().log("Invalidated all tooltip caches");
+            LOGGER.atFine().log("Invalidated all tooltip caches");
         }
 
         @Override
@@ -221,7 +222,7 @@ public class DynamicTooltipsLib extends JavaPlugin {
         public void refreshAllPlayers() {
             invalidateAll();
             int count = packetAdapter.refreshAllPlayers();
-            LOGGER.atInfo().log("Refreshed tooltips for " + count + " players");
+            LOGGER.atFine().log("Refreshed tooltips for " + count + " players");
         }
     }
 }

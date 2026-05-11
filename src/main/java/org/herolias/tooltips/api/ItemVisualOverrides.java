@@ -12,6 +12,7 @@ import com.hypixel.hytale.protocol.ItemWeapon;
 import com.hypixel.hytale.protocol.ModelParticle;
 import com.hypixel.hytale.protocol.ModelTrail;
 import com.hypixel.hytale.protocol.Modifier;
+import com.hypixel.hytale.protocol.ResistanceModifier;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -239,7 +240,7 @@ public final class ItemVisualOverrides {
         h = 31 * h + java.util.Arrays.hashCode(obj.cosmeticsToHide);
         h = 31 * h + Double.hashCode(obj.baseDamageResistance);
         h = 31 * h + deepHashModifierMap(obj.statModifiers);
-        h = 31 * h + deepHashModifierMapStr(obj.damageResistance);
+        h = 31 * h + deepHashResistanceModifierMapStr(obj.damageResistance);
         h = 31 * h + deepHashModifierMapStr(obj.damageEnhancement);
         h = 31 * h + deepHashModifierMapStr(obj.damageClassEnhancement);
         return h;
@@ -267,6 +268,15 @@ public final class ItemVisualOverrides {
         if (map == null) return 0;
         int h = 0;
         for (Map.Entry<String, Modifier[]> entry : map.entrySet()) {
+            h += (entry.getKey() != null ? entry.getKey().hashCode() : 0) ^ java.util.Arrays.hashCode(entry.getValue());
+        }
+        return h;
+    }
+
+    private static int deepHashResistanceModifierMapStr(Map<String, ResistanceModifier[]> map) {
+        if (map == null) return 0;
+        int h = 0;
+        for (Map.Entry<String, ResistanceModifier[]> entry : map.entrySet()) {
             h += (entry.getKey() != null ? entry.getKey().hashCode() : 0) ^ java.util.Arrays.hashCode(entry.getValue());
         }
         return h;
@@ -445,10 +455,10 @@ public final class ItemVisualOverrides {
 
         /**
          * Convenience: override the damage resistance map in the armor tooltip section.
-         * Keys are damage type identifiers; values are arrays of {@link Modifier}.
+         * Keys are damage type identifiers; values are arrays of {@link ResistanceModifier}.
          */
         @Nonnull
-        public Builder armorDamageResistance(@Nullable Map<String, Modifier[]> resistance) {
+        public Builder armorDamageResistance(@Nullable Map<String, ResistanceModifier[]> resistance) {
             ensureArmor().damageResistance = resistance;
             return this;
         }

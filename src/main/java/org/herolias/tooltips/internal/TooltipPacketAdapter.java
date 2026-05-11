@@ -54,6 +54,7 @@ import java.util.concurrent.TimeUnit;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.component.Store;
+import com.hypixel.hytale.server.core.inventory.InventoryComponent;
 
 /**
  * Bidirectional packet adapter that provides per-item dynamic tooltips
@@ -1000,7 +1001,9 @@ public class TooltipPacketAdapter {
                 Integer slotObj = null;
                 Player player = getObservedPlayerComponent(observedPlayerRef);
                 if (player != null) {
-                    slotObj = (int) player.getInventory().getActiveHotbarSlot();
+                    Ref<EntityStore> ref = observedPlayerRef.getReference();
+                    InventoryComponent.Hotbar hotbar = ref.getStore().getComponent(ref, InventoryComponent.Hotbar.getComponentType());
+                    slotObj = hotbar != null ? (int) hotbar.getActiveSlot() : 0;
                 } else {
                     slotObj = playerActiveHotbarSlots.get(observedPlayerUuid);
                 }
@@ -1064,9 +1067,15 @@ public class TooltipPacketAdapter {
         Player observedPlayer = getObservedPlayerComponent(observedPlayerRef);
         if (observedPlayer == null) return false;
 
-        ItemStack stack = leftHand
-                ? observedPlayer.getInventory().getUtilityItem()
-                : observedPlayer.getInventory().getItemInHand();
+        Ref<EntityStore> ref = observedPlayerRef.getReference();
+        Store<EntityStore> store = ref.getStore();
+        ItemStack stack = null;
+        if (leftHand) {
+            InventoryComponent.Utility utility = store.getComponent(ref, InventoryComponent.Utility.getComponentType());
+            if (utility != null) stack = utility.getActiveItem();
+        } else {
+            stack = InventoryComponent.getItemInHand(store, ref);
+        }
         if (stack == null) return false;
 
         String stackItemId = stack.getItemId();
