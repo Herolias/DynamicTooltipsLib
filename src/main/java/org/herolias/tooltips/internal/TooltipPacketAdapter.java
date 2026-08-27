@@ -729,7 +729,7 @@ public class TooltipPacketAdapter {
             if (command.data == null || command.data.isEmpty()) continue;
 
             String modifiedData = processCustomUICommandData(
-                    playerUuid, language, command.data, newVirtualItems, translations);
+                    playerUuid, language, command.selector, command.data, newVirtualItems, translations);
             if (modifiedData != null) {
                 command.data = modifiedData;
             }
@@ -742,24 +742,50 @@ public class TooltipPacketAdapter {
     private String processCustomUICommandData(
             @Nonnull UUID playerUuid,
             @Nullable String language,
+            @Nullable String selector,
             @Nonnull String data,
             @Nonnull Map<String, ItemBase> newVirtualItems,
             @Nonnull Map<String, String> translations) {
 
         try {
             BsonDocument doc = BsonDocument.parse(data);
-            BsonValue value = doc.get("0");
-            if (value == null) return null;
-
             boolean modified = false;
 
-            if (value.isArray()) {
-                org.bson.BsonArray array = value.asArray();
-                for (int i = 0; i < array.size(); i++) {
-                    BsonValue element = array.get(i);
-                    if (element.isDocument()) {
-                        if (processItemGridSlotDocument(playerUuid, language,
-                                element.asDocument(), newVirtualItems, translations)) {
+            // Some commands store the payload in key "0", others in different
+            // indices depending on opcode/argument layout. Scan every root key.
+            for (Map.Entry<String, BsonValue> rootEntry : doc.entrySet()) {
+                BsonValue rootValue = rootEntry.getValue();
+                if (rootValue == null) continue;
+
+                if (rootValue.isArray()) {
+                    org.bson.BsonArray array = rootValue.asArray();
+                    for (int i = 0; i < array.size(); i++) {
+                        BsonValue element = array.get(i);
+                        if (element == null || !element.isDocument()) continue;
+
+                        BsonDocument elementDoc = element.asDocument();
+                        if (processCustomUiDocumentValue(
+                                playerUuid, language, elementDoc, newVirtualItems, translations)) {
+                            array.set(i, elementDoc);
+                            modified = true;
+                        }
+                    }
+                } else if (rootValue.isDocument()) {
+                    BsonDocument valueDoc = rootValue.asDocument();
+                    if (processCustomUiDocumentValue(
+                            playerUuid, language, valueDoc, newVirtualItems, translations)) {
+                        doc.put(rootEntry.getKey(), valueDoc);
+                        modified = true;
+                    }
+                } else if (rootValue.isString()
+                        && selector != null
+                        && selector.endsWith(".ItemId")) {
+                    String itemId = rootValue.asString().getValue();
+                    if (itemId != null && !itemId.isEmpty()) {
+                        String virtualId = virtualizeCustomUiItemId(
+                                itemId, language, newVirtualItems, translations);
+                        if (virtualId != null && !virtualId.equals(itemId)) {
+                            doc.put(rootEntry.getKey(), new org.bson.BsonString(virtualId));
                             modified = true;
                         }
                     }
@@ -773,6 +799,108 @@ public class TooltipPacketAdapter {
         }
 
         return null;
+    }
+
+    /**
+     * Handles Custom UI value documents in multiple shapes:
+     * <ul>
+     *   <li>Direct ItemStack document (ItemSlot.ItemStack)</li>
+     *   <li>Slot-style wrapper with ItemStack child</li>
+     *   <li>One-level nested documents containing either shape</li>
+     * </ul>
+     */
+    private boolean processCustomUiDocumentValue(
+            @Nonnull UUID playerUuid,
+            @Nullable String language,
+            @Nonnull BsonDocument valueDoc,
+            @Nonnull Map<String, ItemBase> newVirtualItems,
+            @Nonnull Map<String, String> translations) {
+
+        boolean modified = false;
+
+        // Case 1: direct ItemStack document (common for ItemSlot.ItemStack)
+        modified |= processDirectItemStackDocument(playerUuid, language, valueDoc, newVirtualItems, translations);
+
+        // Case 2: slot-style wrapper { "ItemStack": { ... } }
+        if (valueDoc.get("ItemStack") != null && valueDoc.get("ItemStack").isDocument()) {
+            BsonDocument before = valueDoc.clone();
+            processItemGridSlotDocument(playerUuid, language, valueDoc, newVirtualItems, translations);
+            if (!valueDoc.equals(before)) {
+                modified = true;
+            }
+        }
+
+        // Case 3: one-level nested structures (e.g. { "Item": { ... } })
+        for (Map.Entry<String, BsonValue> entry : valueDoc.entrySet()) {
+            BsonValue childValue = entry.getValue();
+            if (childValue == null || !childValue.isDocument()) continue;
+            BsonDocument childDoc = childValue.asDocument();
+
+            BsonDocument childBefore = childDoc.clone();
+            boolean childModified = false;
+
+            childModified |= processDirectItemStackDocument(
+                    playerUuid, language, childDoc, newVirtualItems, translations);
+
+            if (childDoc.get("ItemStack") != null && childDoc.get("ItemStack").isDocument()) {
+                processItemGridSlotDocument(playerUuid, language, childDoc, newVirtualItems, translations);
+            }
+
+            if (!childDoc.equals(childBefore) || childModified) {
+                valueDoc.put(entry.getKey(), childDoc);
+                modified = true;
+            }
+        }
+
+        return modified;
+    }
+
+    /**
+     * Processes a raw ItemStack-like document by wrapping it into a synthetic
+     * { "ItemStack": ... } shape reused by the existing ItemGrid pipeline.
+     */
+    private boolean processDirectItemStackDocument(
+            @Nonnull UUID playerUuid,
+            @Nullable String language,
+            @Nonnull BsonDocument itemStackDoc,
+            @Nonnull Map<String, ItemBase> newVirtualItems,
+            @Nonnull Map<String, String> translations) {
+
+        if (!looksLikeItemStackDocument(itemStackDoc)) {
+            return false;
+        }
+
+        BsonDocument before = itemStackDoc.clone();
+        BsonDocument syntheticSlot = new BsonDocument("ItemStack", itemStackDoc);
+        processItemGridSlotDocument(playerUuid, language, syntheticSlot, newVirtualItems, translations);
+        return !itemStackDoc.equals(before);
+    }
+
+    private boolean looksLikeItemStackDocument(@Nonnull BsonDocument doc) {
+        BsonValue idValue = doc.get("Id");
+        if (idValue == null || !idValue.isString()) {
+            idValue = doc.get("ItemId");
+            if (idValue == null || !idValue.isString()) {
+                return false;
+            }
+        }
+
+        // Typical ItemStack fields in Hytale packets. Some UI commands serialize
+        // compact ItemStack docs (sometimes only Id/ItemId + one field), so we
+        // keep this permissive while still filtering obvious non-item docs.
+        boolean hasTypicalItemStackField = doc.containsKey("Quantity")
+                || doc.containsKey("Metadata")
+                || doc.containsKey("Durability")
+                || doc.containsKey("MaxDurability")
+                || doc.containsKey("OverrideDroppedItemAnimation");
+
+        if (hasTypicalItemStackField) {
+            return true;
+        }
+
+        // Fallback for minimal ItemStack representations used by some ItemSlot
+        // paths (Id only / very small docs).
+        return doc.size() <= 6 && !doc.containsKey("Children") && !doc.containsKey("Layout");
     }
 
     private boolean processItemGridSlotDocument(
@@ -851,6 +979,55 @@ public class TooltipPacketAdapter {
         }
 
         return false;
+    }
+
+    /**
+     * Virtualizes an ItemId-only Custom UI command (no ItemStack metadata),
+     * which is the format used by many ItemSlot/ItemSlotButton updates.
+     */
+    @Nullable
+    private String virtualizeCustomUiItemId(
+            @Nonnull String itemId,
+            @Nullable String language,
+            @Nonnull Map<String, ItemBase> newVirtualItems,
+            @Nonnull Map<String, String> translations) {
+
+        TooltipRegistry.ComposedTooltip composed = tooltipRegistry.compose(itemId, null, language);
+        if (composed == null) {
+            return null;
+        }
+
+        String virtualId = VirtualItemRegistry.generateVirtualId(itemId, composed.getCombinedHash());
+        ItemBase virtualBase = virtualItemRegistry.getOrCreateVirtualItemBase(
+                itemId,
+                virtualId,
+                composed.getNameOverride(),
+                composed.getVisualOverrides(),
+                composed.getNameTranslationKey(),
+                composed.getDescriptionTranslationKey()
+        );
+        if (virtualBase == null) {
+            return null;
+        }
+
+        newVirtualItems.put(virtualId, virtualBase);
+
+        String descKey = VirtualItemRegistry.getVirtualDescriptionKey(virtualId);
+        if (!translations.containsKey(descKey)) {
+            String originalDesc = globalTooltipManager != null
+                    ? globalTooltipManager.getGlobalDescription(itemId, language)
+                    : virtualItemRegistry.getOriginalDescription(itemId, language);
+            String enrichedDesc = composed.buildDescription(originalDesc);
+            translations.put(descKey, enrichedDesc);
+            virtualItemRegistry.cacheDescription(virtualId, language, enrichedDesc);
+        }
+
+        if (composed.getNameOverride() != null) {
+            String nameKey = VirtualItemRegistry.getVirtualNameKey(virtualId);
+            translations.put(nameKey, composed.getNameOverride());
+        }
+
+        return virtualId;
     }
 
 
