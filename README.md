@@ -2,7 +2,7 @@
 
 > A library mod for **Hytale** that enables dynamic, per-item tooltips.
 
-Version 1.6.1 targets Hytale Update 6 (`0.6.0-pre.13.1`).
+Version 1.6.2 targets Hytale Update 6 (`0.6.0-pre.13.1`).
 
 **DynamicTooltipsLib** overcomes Hytale's static tooltip limitation by transparently creating virtual item definitions. This allows two items of the same type (e.g., two Iron Swords) to display completely different descriptions, based on their metadata, NBT, or external state.
 
@@ -67,7 +67,7 @@ Alternatively, download the JAR and add it locally:
 
 ```gradle
 dependencies {
-    compileOnly files("libs/DynamicTooltipsLib-1.6.1.jar")
+    compileOnly files("libs/DynamicTooltipsLib-1.6.2.jar")
 }
 ```
 
@@ -79,7 +79,7 @@ Add it to your `manifest.json`.
 {
   "Name": "MyMod",
   "Dependencies": {
-    "org.herolias:DynamicTooltipsLib": "1.6.1"
+    "org.herolias:DynamicTooltipsLib": "1.6.2"
   }
 }
 ```
