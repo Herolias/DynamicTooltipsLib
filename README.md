@@ -2,6 +2,8 @@
 
 > A library mod for **Hytale** that enables dynamic, per-item tooltips.
 
+Version 1.6.1 targets Hytale Update 6 (`0.6.0-pre.13.1`).
+
 **DynamicTooltipsLib** overcomes Hytale's static tooltip limitation by transparently creating virtual item definitions. This allows two items of the same type (e.g., two Iron Swords) to display completely different descriptions, based on their metadata, NBT, or external state.
 
 > **Global Tooltips Note**: If you want to change or add lines to **all** items of the same ID (e.g. all apples), use the [Global Tooltip APIs](#global-tooltip-apis) instead. They modify vanilla translations natively without the overhead of creating per-instance virtual items.
@@ -65,7 +67,7 @@ Alternatively, download the JAR and add it locally:
 
 ```gradle
 dependencies {
-    compileOnly files("libs/DynamicTooltipsLib-1.5.0.jar")
+    compileOnly files("libs/DynamicTooltipsLib-1.6.1.jar")
 }
 ```
 
@@ -77,7 +79,7 @@ Add it to your `manifest.json`.
 {
   "Name": "MyMod",
   "Dependencies": {
-    "org.herolias:DynamicTooltipsLib": "1.5.0"
+    "org.herolias:DynamicTooltipsLib": "1.6.1"
   }
 }
 ```
@@ -87,7 +89,7 @@ Add it to your `manifest.json`.
 {
   "Name": "MyMod",
   "OptionalDependencies": {
-    "org.herolias5DynamicTooltipsLib": "*"
+    "org.herolias:DynamicTooltipsLib": "*"
   }
 }
 ```
@@ -426,7 +428,8 @@ For common use cases, the builder also provides convenience methods that create 
 | `.armorSlot(ItemArmorSlot)` | Set which slot label to display (Head, Chest, Hands, Legs) |
 | `.armorBaseDamageResistance(double)` | Set the base damage resistance number |
 | `.armorStatModifiers(Map)` | **Replace** all armor stat modifiers |
-| `.armorDamageResistance(Map)` | **Replace** the damage resistance map |
+| `.armorDamageResistance(Map<String, ResistanceModifier[]>)` | **Replace** the damage resistance map |
+| `.armorMovementSettings(ItemMovementSettings)` | Override movement while the armor is equipped |
 | `.weaponStatModifiers(Map)` | **Replace** all weapon stat modifiers |
 | `.toolSpeed(float)` | Set the tool speed value |
 

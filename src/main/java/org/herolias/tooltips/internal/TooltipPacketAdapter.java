@@ -24,7 +24,7 @@ import com.hypixel.hytale.protocol.packets.interface_.Notification;
 import com.hypixel.hytale.protocol.FormattedMessage;
 import com.hypixel.hytale.server.core.Message;
 import com.hypixel.hytale.server.core.HytaleServer;
-import com.hypixel.hytale.server.core.entity.entities.Player;
+import com.hypixel.hytale.server.core.inventory.InventoryComponent;
 import com.hypixel.hytale.server.core.inventory.ItemStack;
 import com.hypixel.hytale.server.core.io.adapter.PacketAdapters;
 import com.hypixel.hytale.server.core.io.adapter.PacketFilter;
@@ -46,6 +46,7 @@ import com.hypixel.hytale.protocol.packets.player.SetClientId;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import org.herolias.tooltips.api.DynamicTooltipsApi;
+import org.herolias.tooltips.api.ItemVisualOverrides;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
@@ -500,7 +501,8 @@ public class TooltipPacketAdapter {
                                     virtualItem.id, // Use the virtual ID
                                     notification.item.quantity,
                                     notification.item.durability,
-                                    virtualItem.durability, // Apply visual max durability override
+                                    resolveVirtualMaxDurability(notification.item, virtualItem, composed),
+                                    resolveVirtualQuality(notification.item.quality, virtualItem, composed),
                                     notification.item.overrideDroppedItemAnimation,
                                     notification.item.metadata
                             );
@@ -750,6 +752,7 @@ public class TooltipPacketAdapter {
         try {
             BsonDocument doc = BsonDocument.parse(data);
             boolean modified = false;
+            boolean selectorTargetsItemStack = selector != null && selector.endsWith(".ItemStack");
 
             // Some commands store the payload in key "0", others in different
             // indices depending on opcode/argument layout. Scan every root key.
@@ -765,7 +768,8 @@ public class TooltipPacketAdapter {
 
                         BsonDocument elementDoc = element.asDocument();
                         if (processCustomUiDocumentValue(
-                                playerUuid, language, elementDoc, newVirtualItems, translations)) {
+                                playerUuid, language, elementDoc, selectorTargetsItemStack,
+                                newVirtualItems, translations)) {
                             array.set(i, elementDoc);
                             modified = true;
                         }
@@ -773,7 +777,8 @@ public class TooltipPacketAdapter {
                 } else if (rootValue.isDocument()) {
                     BsonDocument valueDoc = rootValue.asDocument();
                     if (processCustomUiDocumentValue(
-                            playerUuid, language, valueDoc, newVirtualItems, translations)) {
+                            playerUuid, language, valueDoc, selectorTargetsItemStack,
+                            newVirtualItems, translations)) {
                         doc.put(rootEntry.getKey(), valueDoc);
                         modified = true;
                     }
@@ -813,13 +818,16 @@ public class TooltipPacketAdapter {
             @Nonnull UUID playerUuid,
             @Nullable String language,
             @Nonnull BsonDocument valueDoc,
+            boolean allowMinimalDirectItemStack,
             @Nonnull Map<String, ItemBase> newVirtualItems,
             @Nonnull Map<String, String> translations) {
 
         boolean modified = false;
 
         // Case 1: direct ItemStack document (common for ItemSlot.ItemStack)
-        modified |= processDirectItemStackDocument(playerUuid, language, valueDoc, newVirtualItems, translations);
+        modified |= processDirectItemStackDocument(
+                playerUuid, language, valueDoc, allowMinimalDirectItemStack,
+                newVirtualItems, translations);
 
         // Case 2: slot-style wrapper { "ItemStack": { ... } }
         if (valueDoc.get("ItemStack") != null && valueDoc.get("ItemStack").isDocument()) {
@@ -840,7 +848,9 @@ public class TooltipPacketAdapter {
             boolean childModified = false;
 
             childModified |= processDirectItemStackDocument(
-                    playerUuid, language, childDoc, newVirtualItems, translations);
+                    playerUuid, language, childDoc,
+                    allowMinimalDirectItemStack || "Item".equals(entry.getKey()) || "ItemStack".equals(entry.getKey()),
+                    newVirtualItems, translations);
 
             if (childDoc.get("ItemStack") != null && childDoc.get("ItemStack").isDocument()) {
                 processItemGridSlotDocument(playerUuid, language, childDoc, newVirtualItems, translations);
@@ -863,10 +873,11 @@ public class TooltipPacketAdapter {
             @Nonnull UUID playerUuid,
             @Nullable String language,
             @Nonnull BsonDocument itemStackDoc,
+            boolean allowMinimalItemStack,
             @Nonnull Map<String, ItemBase> newVirtualItems,
             @Nonnull Map<String, String> translations) {
 
-        if (!looksLikeItemStackDocument(itemStackDoc)) {
+        if (!looksLikeItemStackDocument(itemStackDoc, allowMinimalItemStack)) {
             return false;
         }
 
@@ -876,7 +887,7 @@ public class TooltipPacketAdapter {
         return !itemStackDoc.equals(before);
     }
 
-    private boolean looksLikeItemStackDocument(@Nonnull BsonDocument doc) {
+    private boolean looksLikeItemStackDocument(@Nonnull BsonDocument doc, boolean allowMinimalItemStack) {
         BsonValue idValue = doc.get("Id");
         if (idValue == null || !idValue.isString()) {
             idValue = doc.get("ItemId");
@@ -892,6 +903,7 @@ public class TooltipPacketAdapter {
                 || doc.containsKey("Metadata")
                 || doc.containsKey("Durability")
                 || doc.containsKey("MaxDurability")
+                || doc.containsKey("Quality")
                 || doc.containsKey("OverrideDroppedItemAnimation");
 
         if (hasTypicalItemStackField) {
@@ -900,7 +912,10 @@ public class TooltipPacketAdapter {
 
         // Fallback for minimal ItemStack representations used by some ItemSlot
         // paths (Id only / very small docs).
-        return doc.size() <= 6 && !doc.containsKey("Children") && !doc.containsKey("Layout");
+        return allowMinimalItemStack
+                && doc.size() <= 6
+                && !doc.containsKey("Children")
+                && !doc.containsKey("Layout");
     }
 
     private boolean processItemGridSlotDocument(
@@ -931,6 +946,7 @@ public class TooltipPacketAdapter {
         }
 
         String virtualId = null;
+        ItemBase virtualBase = null;
 
         BsonValue metadataValue = itemStackDoc.get("Metadata");
         String metadataStr = null;
@@ -940,13 +956,14 @@ public class TooltipPacketAdapter {
 
         TooltipRegistry.ComposedTooltip composed = tooltipRegistry.compose(itemId, metadataStr, language);
         if (composed != null) {
-            virtualId = VirtualItemRegistry.generateVirtualId(itemId, composed.getCombinedHash());
-            ItemBase virtualBase = virtualItemRegistry.getOrCreateVirtualItemBase(
-                    itemId, virtualId, composed.getNameOverride(), composed.getVisualOverrides(),
+            String candidateVirtualId = VirtualItemRegistry.generateVirtualId(itemId, composed.getCombinedHash());
+            virtualBase = virtualItemRegistry.getOrCreateVirtualItemBase(
+                    itemId, candidateVirtualId, composed.getNameOverride(), composed.getVisualOverrides(),
                     composed.getNameTranslationKey(), composed.getDescriptionTranslationKey()
             );
 
             if (virtualBase != null) {
+                virtualId = candidateVirtualId;
                 newVirtualItems.put(virtualId, virtualBase);
 
                 String descKey = VirtualItemRegistry.getVirtualDescriptionKey(virtualId);
@@ -975,6 +992,9 @@ public class TooltipPacketAdapter {
 
         if (virtualId != null) {
             itemStackDoc.put(idKey, new org.bson.BsonString(virtualId));
+            if (hasQualityOverride(composed)) {
+                itemStackDoc.put("Quality", new org.bson.BsonInt32(virtualBase.qualityIndex));
+            }
             return true;
         }
 
@@ -991,6 +1011,10 @@ public class TooltipPacketAdapter {
             @Nullable String language,
             @Nonnull Map<String, ItemBase> newVirtualItems,
             @Nonnull Map<String, String> translations) {
+
+        if (VirtualItemRegistry.isVirtualId(itemId)) {
+            return null;
+        }
 
         TooltipRegistry.ComposedTooltip composed = tooltipRegistry.compose(itemId, null, language);
         if (composed == null) {
@@ -1126,6 +1150,8 @@ public class TooltipPacketAdapter {
                                 if (virtualBase != null) {
                                     ItemWithAllMetadata clonedItem = itemUpdate.item.clone();
                                     clonedItem.itemId = virtualId;
+                                    clonedItem.quality = resolveVirtualQuality(
+                                            itemUpdate.item.quality, virtualBase, composed);
                                     itemUpdate.item = clonedItem;
                                     newVirtualItems.put(virtualId, virtualBase);
 
@@ -1175,9 +1201,9 @@ public class TooltipPacketAdapter {
             if (rightBaseId != null) {
                 // Fix: Use authoritative active slot from server entity if available
                 Integer slotObj = null;
-                Player player = getObservedPlayerComponent(observedPlayerRef);
-                if (player != null) {
-                    slotObj = (int) player.getInventory().getActiveHotbarSlot();
+                InventoryComponent.Hotbar hotbar = getObservedHotbarComponent(observedPlayerRef);
+                if (hotbar != null) {
+                    slotObj = (int) hotbar.getActiveSlot();
                 } else {
                     slotObj = playerActiveHotbarSlots.get(observedPlayerUuid);
                 }
@@ -1238,12 +1264,7 @@ public class TooltipPacketAdapter {
                                                        @Nonnull EquipmentUpdate equipment,
                                                        @Nonnull Map<String, ItemBase> newVirtualItems,
                                                        @Nonnull Map<String, String> translations) {
-        Player observedPlayer = getObservedPlayerComponent(observedPlayerRef);
-        if (observedPlayer == null) return false;
-
-        ItemStack stack = leftHand
-                ? observedPlayer.getInventory().getUtilityItem()
-                : observedPlayer.getInventory().getItemInHand();
+        ItemStack stack = getObservedHeldItem(observedPlayerRef, leftHand);
         if (stack == null) return false;
 
         String stackItemId = stack.getItemId();
@@ -1297,12 +1318,27 @@ public class TooltipPacketAdapter {
     }
 
     @Nullable
-    private Player getObservedPlayerComponent(@Nonnull PlayerRef observedPlayerRef) {
+    private InventoryComponent.Hotbar getObservedHotbarComponent(@Nonnull PlayerRef observedPlayerRef) {
         Ref<EntityStore> ref = observedPlayerRef.getReference();
         if (ref == null || !ref.isValid()) return null;
         Store<EntityStore> store = ref.getStore();
         if (store == null) return null;
-        return store.getComponent(ref, Player.getComponentType());
+        return store.getComponent(ref, InventoryComponent.Hotbar.getComponentType());
+    }
+
+    @Nullable
+    private ItemStack getObservedHeldItem(@Nonnull PlayerRef observedPlayerRef, boolean leftHand) {
+        Ref<EntityStore> ref = observedPlayerRef.getReference();
+        if (ref == null || !ref.isValid()) return null;
+        Store<EntityStore> store = ref.getStore();
+        if (store == null) return null;
+
+        if (leftHand) {
+            InventoryComponent.Utility utility = store.getComponent(
+                    ref, InventoryComponent.Utility.getComponentType());
+            return utility != null ? utility.getActiveItem() : null;
+        }
+        return InventoryComponent.getItemInHand(store, ref);
     }
 
     private void addVirtualEquipmentItem(@Nonnull PlayerRef recipientRef,
@@ -1456,12 +1492,38 @@ public class TooltipPacketAdapter {
             // Clone, swap ID, replace in section
             ItemWithAllMetadata clonedItem = itemPacket.clone();
             clonedItem.itemId = virtualId;
+            clonedItem.quality = resolveVirtualQuality(itemPacket.quality, virtualBase, composed);
             section.items.put(slot, clonedItem);
 
             if (sectionName != null) {
                 virtualItemRegistry.trackSlotVirtualId(playerUuid, sectionName + ":" + slot, virtualId);
             }
         }
+    }
+
+    private static double resolveVirtualMaxDurability(
+            @Nonnull ItemWithAllMetadata original,
+            @Nonnull ItemBase virtualBase,
+            @Nonnull TooltipRegistry.ComposedTooltip composed) {
+        ItemVisualOverrides overrides = composed.getVisualOverrides();
+        return overrides != null && overrides.getDurability() != null
+                ? virtualBase.durability
+                : original.maxDurability;
+    }
+
+    private static int resolveVirtualQuality(
+            int originalQuality,
+            @Nonnull ItemBase virtualBase,
+            @Nonnull TooltipRegistry.ComposedTooltip composed) {
+        return hasQualityOverride(composed) ? virtualBase.qualityIndex : originalQuality;
+    }
+
+    private static boolean hasQualityOverride(@Nullable TooltipRegistry.ComposedTooltip composed) {
+        if (composed == null) return false;
+        ItemVisualOverrides overrides = composed.getVisualOverrides();
+        return overrides != null && (overrides.getQualityIndex() != null
+                || overrides.getNameColor() != null
+                || overrides.getQualityLabel() != null);
     }
 
 

@@ -5,6 +5,7 @@ import com.hypixel.hytale.protocol.ColorLight;
 import com.hypixel.hytale.protocol.ItemAppearanceCondition;
 import com.hypixel.hytale.protocol.ItemArmor;
 import com.hypixel.hytale.protocol.ItemArmorSlot;
+import com.hypixel.hytale.protocol.ItemMovementSettings;
 import com.hypixel.hytale.protocol.ItemEntityConfig;
 import com.hypixel.hytale.protocol.ItemPullbackConfiguration;
 import com.hypixel.hytale.protocol.ItemTool;
@@ -12,6 +13,7 @@ import com.hypixel.hytale.protocol.ItemWeapon;
 import com.hypixel.hytale.protocol.ModelParticle;
 import com.hypixel.hytale.protocol.ModelTrail;
 import com.hypixel.hytale.protocol.Modifier;
+import com.hypixel.hytale.protocol.ResistanceModifier;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -239,9 +241,10 @@ public final class ItemVisualOverrides {
         h = 31 * h + java.util.Arrays.hashCode(obj.cosmeticsToHide);
         h = 31 * h + Double.hashCode(obj.baseDamageResistance);
         h = 31 * h + deepHashModifierMap(obj.statModifiers);
-        h = 31 * h + deepHashModifierMapStr(obj.damageResistance);
-        h = 31 * h + deepHashModifierMapStr(obj.damageEnhancement);
-        h = 31 * h + deepHashModifierMapStr(obj.damageClassEnhancement);
+        h = 31 * h + deepHashObjectArrayMap(obj.damageResistance);
+        h = 31 * h + deepHashObjectArrayMap(obj.damageEnhancement);
+        h = 31 * h + deepHashObjectArrayMap(obj.damageClassEnhancement);
+        h = 31 * h + Objects.hashCode(obj.movementSettings);
         return h;
     }
 
@@ -263,10 +266,10 @@ public final class ItemVisualOverrides {
         return h;
     }
 
-    private static int deepHashModifierMapStr(Map<String, Modifier[]> map) {
+    private static int deepHashObjectArrayMap(Map<String, ? extends Object[]> map) {
         if (map == null) return 0;
         int h = 0;
-        for (Map.Entry<String, Modifier[]> entry : map.entrySet()) {
+        for (Map.Entry<String, ? extends Object[]> entry : map.entrySet()) {
             h += (entry.getKey() != null ? entry.getKey().hashCode() : 0) ^ java.util.Arrays.hashCode(entry.getValue());
         }
         return h;
@@ -445,11 +448,20 @@ public final class ItemVisualOverrides {
 
         /**
          * Convenience: override the damage resistance map in the armor tooltip section.
-         * Keys are damage type identifiers; values are arrays of {@link Modifier}.
+         * Keys are damage type identifiers; values are arrays of {@link ResistanceModifier}.
          */
         @Nonnull
-        public Builder armorDamageResistance(@Nullable Map<String, Modifier[]> resistance) {
+        public Builder armorDamageResistance(@Nullable Map<String, ResistanceModifier[]> resistance) {
             ensureArmor().damageResistance = resistance;
+            return this;
+        }
+
+        /**
+         * Convenience: override the movement settings applied while this armor is equipped.
+         */
+        @Nonnull
+        public Builder armorMovementSettings(@Nullable ItemMovementSettings movementSettings) {
+            ensureArmor().movementSettings = movementSettings;
             return this;
         }
 
