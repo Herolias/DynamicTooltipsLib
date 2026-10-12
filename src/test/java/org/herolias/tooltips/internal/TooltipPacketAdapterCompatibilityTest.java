@@ -108,7 +108,6 @@ public final class TooltipPacketAdapterCompatibilityTest {
     }
 
     @Nullable
-    @SuppressWarnings("unchecked")
     private BsonDocument process(String selector, String data) throws Exception {
         Map<String, ItemBase> items = new LinkedHashMap<>();
         Map<String, String> translations = new LinkedHashMap<>();
