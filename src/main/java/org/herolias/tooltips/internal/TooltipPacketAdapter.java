@@ -38,7 +38,6 @@ import org.bson.json.JsonWriterSettings;
 import com.hypixel.hytale.protocol.packets.entities.EntityUpdates;
 import com.hypixel.hytale.protocol.EntityUpdate;
 import com.hypixel.hytale.protocol.ComponentUpdate;
-import com.hypixel.hytale.protocol.ComponentUpdateType;
 import com.hypixel.hytale.protocol.ItemUpdate;
 import com.hypixel.hytale.protocol.EquipmentUpdate;
 import com.hypixel.hytale.protocol.packets.player.SetClientId;
@@ -228,7 +227,7 @@ public class TooltipPacketAdapter {
         try {
             HytaleServer.SCHEDULED_EXECUTOR.schedule(() -> {
                 try {
-                    boolean sent = refreshPlayer(playerUuid);
+                    refreshPlayer(playerUuid);
                 } catch (Exception e) {
                     LOGGER.atWarning().log("Post-transition tooltip refresh failed for "
                             + playerUuid + ": " + e.getMessage());
@@ -1139,7 +1138,7 @@ public class TooltipPacketAdapter {
                                             baseItemId, playerRef.getLanguage());
                                 }
 
-                                String virtualId = virtualItemRegistry.generateVirtualId(
+                                String virtualId = VirtualItemRegistry.generateVirtualId(
                                         baseItemId, composed.getCombinedHash());
                                 ItemBase virtualBase = virtualItemRegistry.getOrCreateVirtualItemBase(
                                         baseItemId, virtualId, effectiveName,
@@ -1457,7 +1456,7 @@ public class TooltipPacketAdapter {
             }
 
             String baseItemId = itemPacket.itemId;
-            String virtualId = virtualItemRegistry.generateVirtualId(baseItemId, composed.getCombinedHash());
+            String virtualId = VirtualItemRegistry.generateVirtualId(baseItemId, composed.getCombinedHash());
 
             // Get or create the virtual ItemBase definition
             ItemBase virtualBase = virtualItemRegistry.getOrCreateVirtualItemBase(
@@ -1599,7 +1598,7 @@ public class TooltipPacketAdapter {
                 for (Map.Entry<String, String> entry : delta.entrySet()) {
                     if (entry.getKey().endsWith(".description")) {
                         deltaDescCount++;
-                        String val = entry.getValue();
+                        entry.getValue();
                     }
                 }
             }
