@@ -69,7 +69,7 @@ import com.hypixel.hytale.component.Store;
  * Every item with tooltip data gets a unique virtual item ID (a clone of the
  * original with modified translation properties). This applies uniformly to
  * <b>all</b> inventory sections: hotbar, utility, tools, armor, storage,
- * backpack, builder material, and container windows.
+ * backpack, ability slots, rune bag, builder material, and container windows.
  *
  * <h2>Inbound translation</h2>
  * The inbound filter translates any virtual item IDs in {@link MouseInteraction}
@@ -558,6 +558,8 @@ public class TooltipPacketAdapter {
             processSection(playerUuid, "armor", packet.armor, language, newVirtualItems, translations);
             processSection(playerUuid, "storage", packet.storage, language, newVirtualItems, translations);
             processSection(playerUuid, "backpack", packet.backpack, language, newVirtualItems, translations);
+            processSection(playerUuid, "abilitySlots", packet.abilitySlots, language, newVirtualItems, translations);
+            processSection(playerUuid, "runeBag", packet.runeBag, language, newVirtualItems, translations);
         } catch (Exception e) {
             LOGGER.atSevere().log("Error in processPlayerInventory for " + playerUuid + ": " + e.getMessage());
         } finally {
@@ -610,6 +612,8 @@ public class TooltipPacketAdapter {
         collectVirtualItemsForCrafting(playerUuid, rawInv.armor, virtualBaseQuantities);
         collectVirtualItemsForCrafting(playerUuid, rawInv.storage, virtualBaseQuantities);
         collectVirtualItemsForCrafting(playerUuid, rawInv.backpack, virtualBaseQuantities);
+        collectVirtualItemsForCrafting(playerUuid, rawInv.abilitySlots, virtualBaseQuantities);
+        collectVirtualItemsForCrafting(playerUuid, rawInv.runeBag, virtualBaseQuantities);
 
         if (virtualBaseQuantities.isEmpty()) return;
 
@@ -1758,6 +1762,8 @@ public class TooltipPacketAdapter {
         clone.armor = cloneSection(original.armor);
         clone.storage = cloneSection(original.storage);
         clone.backpack = cloneSection(original.backpack);
+        clone.abilitySlots = cloneSection(original.abilitySlots);
+        clone.runeBag = cloneSection(original.runeBag);
         return clone;
     }
 
